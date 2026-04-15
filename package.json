@@ -9,9 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.2.1",
+    "@clerk/ui": "^1.6.1",
+    "@neondatabase/serverless": "^1.0.2",
+    "@prisma/adapter-neon": "^7.7.0",
+    "@prisma/client": "^7.7.0",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.4.2",
     "next": "16.2.3",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "ultravox-client": "^0.5.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -20,7 +29,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "prisma": "^7.7.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

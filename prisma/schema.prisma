@@ -1,0 +1,99 @@
+// Multitenant voice agent platform.
+// Clerk is the source of truth for identity (users, organizations, memberships).
+// This database stores business data scoped per organization, keyed by the
+// Clerk organization id. Every org-scoped model includes `organizationId` and
+// is indexed on it so every query can (and must) filter by organization.
+//
+// Ultravox is the source of truth for the voice runtime (agent config live on
+// their side as `ultravoxAgentId`, calls live as `ultravoxCallId`). Our DB
+// stores drafts, ownership, transcripts, and org-scoping; Ultravox stores the
+// runtime.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id              String   @id @default(cuid())
+  clerkId         String   @unique
+  slug            String   @unique
+  name            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agents          Agent[]
+  calls           Call[]
+  activityLogs    ActivityLog[]
+
+  @@index([slug])
+}
+
+model Agent {
+  id               String   @id @default(cuid())
+  organizationId   String
+  name             String
+  systemPrompt     String   @db.Text
+  openingLine      String?  @db.Text
+  voice            String   @default("Jessica")
+  temperature      Float    @default(0.3)
+  /// Ultravox agent id — null until first successful publish to Ultravox.
+  ultravoxAgentId  String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  calls            Call[]
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+}
+
+model Call {
+  id                String     @id @default(cuid())
+  organizationId    String
+  agentId           String
+  /// Clerk userId of the person who started the call (for test calls) or
+  /// "system" for inbound telephony.
+  initiatedByClerkId String
+  /// Ultravox call id — set as soon as the call is created on Ultravox.
+  ultravoxCallId    String     @unique
+  status            CallStatus @default(CONNECTING)
+  startedAt         DateTime   @default(now())
+  endedAt           DateTime?
+  durationSec       Int?
+  /// Array of { speaker, text, isFinal, ordinal } objects captured at end.
+  transcriptJson    Json?
+  /// Summary / notes left by a reviewer, if any.
+  reviewNote        String?    @db.Text
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent             Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, startedAt])
+  @@index([agentId, startedAt])
+}
+
+enum CallStatus {
+  CONNECTING
+  ACTIVE
+  ENDED
+  FAILED
+}
+
+model ActivityLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorClerkId   String
+  action         String
+  subject        String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
