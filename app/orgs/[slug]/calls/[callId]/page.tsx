@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { db } from "@/lib/db";
 import { requireTenant } from "@/lib/tenant";
 import type { UltravoxTranscriptLine } from "@/lib/ultravox";
+import { RefreshSummaryButton } from "./refresh-summary-button";
 
 export default async function CallReviewPage({
   params,
@@ -53,6 +54,27 @@ export default async function CallReviewPage({
           </>
         }
       />
+
+      {/* Summary — shown when Ultravox has generated one */}
+      {(call.shortSummary || call.summary) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {call.shortSummary && (
+              <p className="text-[14px] font-medium leading-[1.5] text-ink">
+                {call.shortSummary}
+              </p>
+            )}
+            {call.summary && (
+              <p className="whitespace-pre-wrap text-[13px] leading-[1.65] text-ink-muted">
+                {call.summary}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <Card>
@@ -132,6 +154,11 @@ export default async function CallReviewPage({
               />
               <Row k="Ultravox ID" v={call.ultravoxCallId} mono />
             </CardContent>
+            {call.status === "ENDED" && !call.shortSummary && !call.summary && (
+              <div className="border-t border-rule px-6 py-3">
+                <RefreshSummaryButton orgSlug={tenant.orgSlug} callId={call.id} />
+              </div>
+            )}
           </Card>
         </div>
       </section>

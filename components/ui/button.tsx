@@ -9,7 +9,7 @@ const base =
   "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-ink text-canvas hover:bg-[#2f2f2f] rounded-[6px]",
+  primary: "bg-ink text-canvas hover:bg-ink-hover rounded-[6px]",
   secondary:
     "bg-surface text-ink border border-rule hover:border-rule-strong rounded-[6px]",
   ghost:

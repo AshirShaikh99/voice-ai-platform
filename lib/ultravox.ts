@@ -90,6 +90,8 @@ export type UltravoxCall = {
   ended?: string | null;
   joinUrl: string;
   endReason?: string | null;
+  shortSummary?: string | null;
+  summary?: string | null;
 };
 
 export type UltravoxTranscriptLine = {
@@ -262,11 +264,23 @@ export async function getUltravoxCall(
   return ultravoxFetch(`/calls/${ultravoxCallId}`);
 }
 
+/**
+ * Fetch persisted transcript for a call.
+ *
+ * The Ultravox REST API returns messages in a slightly different shape than
+ * the realtime data-messages stream, so we normalise both:
+ *
+ *   - Data message format: { role: "agent" | "user", text, ordinal, medium }
+ *   - REST fallback:       { role: "MESSAGE_ROLE_AGENT" | ..., text, ordinal, medium }
+ *
+ * We parse both via lowercase substring match so the function is robust to
+ * future enum changes.
+ */
 export async function getUltravoxCallMessages(
   ultravoxCallId: string,
 ): Promise<UltravoxTranscriptLine[]> {
   type MessagesResponse = {
-    results: Array<{
+    results?: Array<{
       role?: string;
       text?: string;
       medium?: string;
@@ -277,12 +291,20 @@ export async function getUltravoxCallMessages(
     `/calls/${ultravoxCallId}/messages`,
   );
   return (data.results ?? [])
-    .filter((m) => m.text && (m.role === "MESSAGE_ROLE_USER" || m.role === "MESSAGE_ROLE_AGENT"))
-    .map((m, i) => ({
-      speaker: m.role === "MESSAGE_ROLE_AGENT" ? ("agent" as const) : ("user" as const),
-      text: m.text!,
-      isFinal: true,
-      ordinal: m.ordinal ?? i,
-      medium: m.medium === "MESSAGE_MEDIUM_TEXT" ? ("text" as const) : ("voice" as const),
-    }));
+    .filter(
+      (m): m is { role: string; text: string; medium?: string; ordinal?: number } =>
+        typeof m.text === "string" && m.text.length > 0 && typeof m.role === "string",
+    )
+    .map((m, i) => {
+      const role = m.role.toLowerCase();
+      const isAgent = role.includes("agent");
+      const isText = (m.medium ?? "").toLowerCase().includes("text");
+      return {
+        speaker: isAgent ? ("agent" as const) : ("user" as const),
+        text: m.text,
+        isFinal: true,
+        ordinal: m.ordinal ?? i,
+        medium: isText ? ("text" as const) : ("voice" as const),
+      };
+    });
 }

@@ -73,7 +73,7 @@ function AmbientLight() {
       className="pointer-events-none absolute inset-x-0 top-0 h-[540px]"
       style={{
         background:
-          "radial-gradient(ellipse 70% 55% at 50% 0%, rgba(120, 110, 90, 0.05), transparent 70%)",
+          "radial-gradient(ellipse 70% 55% at 50% 0%, rgba(220, 200, 160, 0.06), transparent 70%)",
       }}
     />
   );

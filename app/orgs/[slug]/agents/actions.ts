@@ -10,6 +10,7 @@ import {
   createUltravoxAgent,
   createUltravoxCall,
   deleteUltravoxAgent,
+  getUltravoxCall,
   getUltravoxCallMessages,
   updateUltravoxAgent,
   UltravoxError,
@@ -303,6 +304,18 @@ export async function endCallAction(
       // Keep the local snapshot.
     }
 
+    // Grab Ultravox-generated summaries. They're computed async so they may
+    // still be null — that's fine, we store what's available and can backfill.
+    let shortSummary: string | null = null;
+    let summary: string | null = null;
+    try {
+      const uvCall = await getUltravoxCall(call.ultravoxCallId);
+      shortSummary = uvCall.shortSummary ?? null;
+      summary = uvCall.summary ?? null;
+    } catch {
+      // Non-fatal — summaries are best-effort at end time.
+    }
+
     const endedAt = new Date();
     const durationSec = Math.max(
       0,
@@ -316,6 +329,8 @@ export async function endCallAction(
         endedAt,
         durationSec,
         transcriptJson: transcript as unknown as object,
+        shortSummary,
+        summary,
       },
     });
 
@@ -376,6 +391,44 @@ export async function deleteAgentAction(formData: FormData) {
 
   revalidatePath(`/orgs/${tenant.orgSlug}/agents`);
   redirect(`/orgs/${tenant.orgSlug}/agents`);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Refresh call summary — backfill when summaries weren't ready at end time
+   ──────────────────────────────────────────────────────────────── */
+
+export async function refreshCallSummaryAction(
+  slug: string,
+  callId: string,
+): Promise<
+  | { ok: true; shortSummary: string | null; summary: string | null }
+  | { ok: false; error: string }
+> {
+  try {
+    const tenant = await requireTenant(slug);
+
+    const call = await db.call.findFirst({
+      where: { id: callId, organizationId: tenant.organizationId },
+    });
+    if (!call) return { ok: false, error: "Call not found." };
+
+    const uvCall = await getUltravoxCall(call.ultravoxCallId);
+    const shortSummary = uvCall.shortSummary ?? null;
+    const summary = uvCall.summary ?? null;
+
+    if (shortSummary || summary) {
+      await db.call.update({
+        where: { id: callId },
+        data: { shortSummary, summary },
+      });
+      revalidatePath(`/orgs/${tenant.orgSlug}/calls/${callId}`);
+    }
+
+    return { ok: true, shortSummary, summary };
+  } catch (err) {
+    if (isRedirectError(err)) throw err;
+    return { ok: false, error: humanizeError(err, "Could not fetch summary.") };
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────

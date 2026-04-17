@@ -71,6 +71,8 @@ export default async function AgentDetailPage({
               orgSlug={tenant.orgSlug}
               agentId={agent.id}
               agentName={agent.name}
+              agentVoice={agent.voice}
+              openingLine={agent.openingLine}
               canCall={Boolean(agent.ultravoxAgentId)}
             />
           </>
@@ -127,6 +129,11 @@ export default async function AgentDetailPage({
                           <> · {formatDuration(call.durationSec)}</>
                         )}
                       </div>
+                      {call.shortSummary && (
+                        <p className="mt-0.5 text-[12px] leading-[1.5] text-ink-muted line-clamp-1">
+                          {call.shortSummary}
+                        </p>
+                      )}
                     </div>
                     <Link
                       href={`/orgs/${tenant.orgSlug}/calls/${call.id}`}

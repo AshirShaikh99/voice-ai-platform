@@ -1,17 +1,20 @@
 import Link from "next/link";
-import { Show } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 
 import { BRAND } from "@/lib/brand";
 import { Wordmark } from "@/components/ui/wordmark";
 
 export default async function LandingPage() {
-  const { orgSlug } = await auth();
-  const appHref = orgSlug ? `/orgs/${orgSlug}/dashboard` : "/select-org";
+  const { userId, orgSlug } = await auth();
+
+  if (userId) {
+    redirect(orgSlug ? `/orgs/${orgSlug}/dashboard` : "/select-org");
+  }
 
   return (
     <div className="relative flex min-h-screen flex-col bg-canvas">
-      <SiteNav appHref={appHref} />
+      <SiteNav />
       <main className="flex-1">
         <Hero />
         <Capabilities />
@@ -28,7 +31,7 @@ export default async function LandingPage() {
    Navigation
    ──────────────────────────────────────────────────────────────── */
 
-function SiteNav({ appHref }: { appHref: string }) {
+function SiteNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-rule bg-canvas/85 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -45,28 +48,18 @@ function SiteNav({ appHref }: { appHref: string }) {
           </a>
         </nav>
         <div className="flex items-center gap-2">
-          <Show when="signed-out">
-            <Link
-              href="/sign-in"
-              className="hidden h-9 items-center rounded-[6px] px-3 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink sm:inline-flex"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/sign-up"
-              className="inline-flex h-9 items-center rounded-[6px] bg-ink px-4 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
-            >
-              Start a workspace
-            </Link>
-          </Show>
-          <Show when="signed-in">
-            <Link
-              href={appHref}
-              className="inline-flex h-9 items-center rounded-[6px] bg-ink px-4 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
-            >
-              Open workspace
-            </Link>
-          </Show>
+          <Link
+            href="/sign-in"
+            className="hidden h-9 items-center rounded-[6px] px-3 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink sm:inline-flex"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/sign-up"
+            className="inline-flex h-9 items-center rounded-[6px] bg-ink px-4 text-[13px] font-medium text-canvas transition-colors hover:bg-ink-hover"
+          >
+            Start a workspace
+          </Link>
         </div>
       </div>
     </header>
@@ -100,7 +93,7 @@ function Hero() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/sign-up"
-              className="group inline-flex h-11 items-center gap-2 rounded-[6px] bg-ink px-5 text-[14px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
+              className="group inline-flex h-11 items-center gap-2 rounded-[6px] bg-ink px-5 text-[14px] font-medium text-canvas transition-colors hover:bg-ink-hover"
             >
               Start a workspace
               <ArrowRight />
@@ -240,7 +233,7 @@ function AmbientLight() {
       className="pointer-events-none absolute inset-x-0 top-0 h-[540px]"
       style={{
         background:
-          "radial-gradient(ellipse 70% 55% at 50% 0%, rgba(120, 110, 90, 0.06), transparent 70%)",
+          "radial-gradient(ellipse 70% 55% at 50% 0%, rgba(220, 200, 160, 0.07), transparent 70%)",
       }}
     />
   );
@@ -454,7 +447,7 @@ function ClosingCTA() {
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/sign-up"
-            className="inline-flex h-11 items-center gap-2 rounded-[6px] bg-ink px-6 text-[14px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
+            className="inline-flex h-11 items-center gap-2 rounded-[6px] bg-ink px-6 text-[14px] font-medium text-canvas transition-colors hover:bg-ink-hover"
           >
             Create a workspace
             <ArrowRight />

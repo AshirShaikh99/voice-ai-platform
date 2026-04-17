@@ -75,7 +75,7 @@ export default async function DashboardPage({
             </Button>
             <Link
               href={`/orgs/${tenant.orgSlug}/agents/new`}
-              className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
+              className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink-hover"
             >
               New agent
               <ArrowRight />

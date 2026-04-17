@@ -32,14 +32,38 @@ type Props = {
   orgSlug: string;
   agentId: string;
   agentName: string;
+  agentVoice?: string;
+  openingLine?: string | null;
   openOnMount?: boolean;
   onClose?: () => void;
 };
+
+/**
+ * Synchronous teardown for an Ultravox session. Mutes both sides first so
+ * the user hears silence the moment this runs, then fires (but doesn't
+ * await) the WebRTC disconnect. Safe to call on an already-left session.
+ */
+function teardownSession(session: UltravoxSession | null | undefined) {
+  if (!session) return;
+  try {
+    session.muteSpeaker();
+  } catch {
+    /* ignore */
+  }
+  try {
+    session.muteMic();
+  } catch {
+    /* ignore */
+  }
+  void session.leaveCall().catch(() => {});
+}
 
 export function TestCallDialog({
   orgSlug,
   agentId,
   agentName,
+  agentVoice,
+  openingLine,
   openOnMount = true,
   onClose,
 }: Props) {
@@ -51,71 +75,69 @@ export function TestCallDialog({
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
 
   const sessionRef = useRef<UltravoxSession | null>(null);
   const phaseRef = useRef<Phase>(phase);
-  phaseRef.current = phase;
+  useEffect(() => {
+    phaseRef.current = phase;
+  });
 
-  /* ────────── Teardown helper (safe to call multiple times) ────────── */
+  /* ────────── Shared session boot ────────── */
 
-  const teardownSession = useCallback(async () => {
-    const session = sessionRef.current;
-    if (!session) return;
-    sessionRef.current = null;
-    // Silence immediately — mute both ends so the user hears nothing the
-    // instant they click End, even before the WebRTC teardown completes.
-    try {
-      session.muteSpeaker();
-    } catch {
-      /* ignore */
-    }
-    try {
-      session.muteMic();
-    } catch {
-      /* ignore */
-    }
-    try {
-      await session.leaveCall();
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const joinNewSession = useCallback(
+    async (isCancelled: () => boolean) => {
+      setPhase({ kind: "starting" });
+      setTranscripts([]);
+      setIsMicMuted(false);
+      setElapsed(0);
+      setCollapsed(false);
 
-  /* ────────── Start call ────────── */
+      const stale = sessionRef.current;
+      if (stale) {
+        teardownSession(stale);
+        sessionRef.current = null;
+      }
 
-  const start = useCallback(async () => {
-    if (phaseRef.current.kind !== "idle" && phaseRef.current.kind !== "error")
-      return;
+      const result = await startTestCallAction(orgSlug, agentId);
+      if (isCancelled()) return;
+      if (!result.ok) {
+        setPhase({ kind: "error", message: result.error });
+        return;
+      }
 
-    setPhase({ kind: "starting" });
-    setTranscripts([]);
-    setIsMicMuted(false);
-    setElapsed(0);
+      const session = new UltravoxSession();
+      sessionRef.current = session;
 
-    const result = await startTestCallAction(orgSlug, agentId);
-    if (!result.ok) {
-      setPhase({ kind: "error", message: result.error });
-      return;
-    }
+      session.addEventListener("status", () => {
+        setStatus(session.status);
+      });
+      session.addEventListener("transcripts", () => {
+        setTranscripts([...session.transcripts]);
+      });
 
-    const session = new UltravoxSession();
-    sessionRef.current = session;
+      if (isCancelled()) {
+        teardownSession(session);
+        if (sessionRef.current === session) sessionRef.current = null;
+        return;
+      }
 
-    session.addEventListener("status", () => {
-      setStatus(session.status);
-    });
-    session.addEventListener("transcripts", () => {
-      setTranscripts([...session.transcripts]);
-    });
+      session.joinCall(result.joinUrl);
 
-    session.joinCall(result.joinUrl);
+      if (isCancelled()) {
+        teardownSession(session);
+        if (sessionRef.current === session) sessionRef.current = null;
+        return;
+      }
 
-    setPhase({
-      kind: "live",
-      callId: result.callId,
-      startedAtMs: Date.now(),
-    });
-  }, [orgSlug, agentId]);
+      setPhase({
+        kind: "live",
+        callId: result.callId,
+        startedAtMs: Date.now(),
+      });
+    },
+    [orgSlug, agentId],
+  );
 
   /* ────────── End call ────────── */
 
@@ -123,49 +145,48 @@ export function TestCallDialog({
     const current = phaseRef.current;
     if (current.kind !== "live") return;
 
-    setPhase({ kind: "ending" });
-
     const session = sessionRef.current;
 
-    // 1. Snapshot transcripts BEFORE tearing the session down — the SDK may
-    //    reset its internal state when the call leaves.
-    const snapshot: UltravoxTranscriptLine[] = (
-      session?.transcripts ?? []
-    ).map((t) => ({
-      speaker: t.speaker === Role.AGENT ? "agent" : "user",
-      text: t.text,
-      isFinal: t.isFinal,
-      ordinal: t.ordinal,
-      medium: t.medium as "voice" | "text",
-    }));
+    // Snapshot transcripts BEFORE teardown — the SDK drops its buffer on disconnect.
+    const snapshot: UltravoxTranscriptLine[] = (session?.transcripts ?? []).map(
+      (t) => ({
+        speaker: t.speaker === Role.AGENT ? "agent" : "user",
+        text: t.text,
+        isFinal: t.isFinal,
+        ordinal: t.ordinal,
+        medium: t.medium as "voice" | "text",
+      }),
+    );
 
-    // 2. Silence + disconnect. Tearing down first means we stop audio
-    //    playback the moment the user clicks, not after the server action.
-    await teardownSession();
-
-    // 3. Persist the call on our side.
-    const res = await endCallAction(orgSlug, current.callId, snapshot);
-    if (!res.ok) {
-      setPhase({ kind: "error", message: res.error });
-      return;
-    }
-
+    // Immediately end the call from the user's perspective.
+    sessionRef.current = null;
+    teardownSession(session);
     setPhase({ kind: "done", callId: current.callId });
-    router.refresh();
-  }, [orgSlug, router, teardownSession]);
 
-  /* ────────── Auto-start on mount, teardown on unmount ────────── */
+    // Persist transcript in the background — don't block the UI.
+    void endCallAction(orgSlug, current.callId, snapshot).then(() => {
+      router.refresh();
+    });
+  }, [orgSlug, router]);
+
+  /* ────────── Auto-start on mount ────────── */
 
   useEffect(() => {
-    if (openOnMount) void start();
+    if (!openOnMount) return;
+    let cancelled = false;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void joinNewSession(() => cancelled);
+
     return () => {
-      // Best-effort cleanup if the user navigates away mid-call. This only
-      // handles the client side — the call row stays as CONNECTING on the
-      // server until a sweeper picks it up.
-      void teardownSession();
+      cancelled = true;
+      const active = sessionRef.current;
+      if (active) {
+        sessionRef.current = null;
+        teardownSession(active);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [joinNewSession, openOnMount]);
 
   /* ────────── Duration ticker ────────── */
 
@@ -177,7 +198,7 @@ export function TestCallDialog({
     return () => window.clearInterval(id);
   }, [phase]);
 
-  /* ────────── Keyboard: Esc ends call (live) or closes dialog (other) ────────── */
+  /* ────────── Keyboard: Esc = end call / close ────────── */
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -195,7 +216,7 @@ export function TestCallDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [end, onClose]);
 
-  /* ────────── Scroll transcript into view ────────── */
+  /* ────────── Auto-scroll transcript ────────── */
 
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -204,283 +225,281 @@ export function TestCallDialog({
     el.scrollTop = el.scrollHeight;
   }, [transcripts.length]);
 
-  /* ────────── Render ────────── */
+  /* ────────── Derived state ────────── */
 
-  const canDismissByBackdrop =
+  const hasLiveTranscript =
+    (phase.kind === "live" ||
+      phase.kind === "ending" ||
+      phase.kind === "done") &&
+    transcripts.length > 0;
+
+  const canCloseNow =
     phase.kind === "idle" ||
     phase.kind === "error" ||
     phase.kind === "done";
 
+  const isActive =
+    phase.kind === "live" &&
+    (status === UltravoxSessionStatus.LISTENING ||
+      status === UltravoxSessionStatus.THINKING ||
+      status === UltravoxSessionStatus.SPEAKING);
+
+  const initials =
+    agentName
+      .split(/\s+/)
+      .map((w) => w[0]?.toUpperCase())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("") || "AG";
+
+  /* ────────── Render ────────── */
+
   return (
     <div
       role="dialog"
-      aria-modal="true"
       aria-label={`Test call with ${agentName}`}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && canDismissByBackdrop) {
-          onClose?.();
-        }
-      }}
-      className="scrim-in fixed inset-0 z-50 flex items-center justify-center bg-[#171717]/55 p-4 backdrop-blur-[6px]"
-      style={{ WebkitBackdropFilter: "blur(6px)" }}
+      className={cn(
+        "fixed bottom-5 right-5 z-50 flex w-[380px] flex-col overflow-hidden rounded-[10px] border border-rule bg-canvas shadow-lg",
+        collapsed ? "h-[56px]" : "h-[520px]",
+      )}
     >
-      <div className="dialog-in relative flex w-full max-w-2xl flex-col rounded-[14px] border border-rule bg-surface shadow-[0_20px_60px_-20px_rgba(15,15,15,0.25)]">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-rule px-8 py-6">
-          <div className="flex items-start gap-4">
-            <VoiceOrb status={status} phase={phase.kind} />
-            <div>
-              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
-                Test call
-              </span>
-              <h2 className="mt-1 font-serif text-[24px] leading-[1.15] tracking-[-0.02em] text-ink">
-                {agentName}
-              </h2>
-            </div>
-          </div>
-          <StatusPill phase={phase} status={status} elapsed={elapsed} />
-        </div>
-
-        {/* Transcript */}
-        <div
-          ref={transcriptRef}
-          className="max-h-[52vh] min-h-[280px] overflow-y-auto px-8 py-6"
+      {/* ── Header bar (always visible, clickable to collapse/expand) ── */}
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-center gap-3 border-b border-rule px-4 py-3 text-left transition-colors hover:bg-surface-muted/40"
+      >
+        {/* Avatar */}
+        <span
+          className={cn(
+            "relative inline-flex size-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium tracking-[0.02em]",
+            isActive
+              ? "border-accent/30 bg-accent-soft text-accent"
+              : "border-rule bg-surface-muted text-ink-muted",
+          )}
         >
-          {phase.kind === "idle" && (
-            <Center>
-              <PulseDots />
-              <p className="mt-4 text-[13px] text-ink-muted">
-                Preparing the call…
-              </p>
-            </Center>
+          {isActive && (
+            <span className="absolute inset-0 animate-ping rounded-full bg-accent/15" />
           )}
-          {phase.kind === "starting" && (
-            <Center>
-              <PulseDots />
-              <p className="mt-4 text-[13px] text-ink-muted">
-                Reaching the agent…
-              </p>
-            </Center>
-          )}
-          {phase.kind === "error" && (
-            <Center>
-              <div className="flex size-10 items-center justify-center rounded-[10px] border border-danger/20 bg-danger-soft text-danger">
-                <IconAlert />
-              </div>
-              <p
-                className="mt-4 max-w-md text-[14px] leading-[1.6] text-danger"
-                role="alert"
-              >
-                {phase.message}
-              </p>
-            </Center>
-          )}
-          {(phase.kind === "live" ||
-            phase.kind === "ending" ||
-            phase.kind === "done") && (
-            <TranscriptList
-              transcripts={transcripts}
-              phase={phase.kind}
-              status={status}
-            />
-          )}
+          <span className="relative">{initials}</span>
+        </span>
+
+        {/* Agent info */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium leading-tight text-ink">
+            {agentName}
+          </p>
+          <p className="text-[10px] uppercase tracking-[0.08em] text-ink-subtle">
+            Test call{agentVoice ? ` · ${agentVoice}` : ""}
+          </p>
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center justify-between gap-3 border-t border-rule px-8 py-5">
-          <div className="flex items-center gap-2">
-            {phase.kind === "live" && (
-              <button
-                type="button"
-                onClick={() => {
-                  const s = sessionRef.current;
-                  if (!s) return;
-                  s.toggleMicMute();
-                  setIsMicMuted(s.isMicMuted);
-                }}
-                className={cn(
-                  "inline-flex h-9 items-center gap-2 rounded-[6px] border px-3 text-[13px] font-medium transition-colors",
-                  isMicMuted
-                    ? "border-danger/30 bg-danger-soft text-danger"
-                    : "border-rule bg-surface text-ink hover:border-rule-strong",
+        {/* Right side: timer + status + chevron */}
+        <div className="flex items-center gap-2">
+          {phase.kind === "live" && (
+            <span className="font-mono text-[11px] tabular-nums text-ink-muted">
+              {formatDuration(elapsed)}
+            </span>
+          )}
+          <StatusDot phase={phase} status={status} />
+          <span
+            className={cn(
+              "text-ink-subtle transition-transform duration-200",
+              collapsed ? "rotate-0" : "rotate-180",
+            )}
+          >
+            <IconChevron />
+          </span>
+        </div>
+      </button>
+
+      {/* ── Body (hidden when collapsed) ── */}
+      {!collapsed && (
+        <>
+          {/* Transcript / status area */}
+          <div
+            ref={transcriptRef}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
+            {hasLiveTranscript ? (
+              <div className="px-4 py-3">
+                <ol className="flex flex-col gap-1.5">
+                  {transcripts.map((t, i) => {
+                    const isAgent = t.speaker === Role.AGENT;
+                    return (
+                      <li
+                        key={`${t.ordinal}-${i}`}
+                        className={cn(
+                          "flex items-start gap-2",
+                          isAgent ? "" : "flex-row-reverse",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-[4px] text-[8px] font-medium uppercase tracking-[0.04em]",
+                            isAgent
+                              ? "bg-surface-muted text-ink-muted"
+                              : "bg-surface-muted text-ink-subtle",
+                          )}
+                        >
+                          {isAgent ? "AG" : "YOU"}
+                        </span>
+                        <p
+                          className={cn(
+                            "max-w-[80%] rounded-[8px] px-3 py-1.5 text-[12px] leading-[1.5]",
+                            isAgent
+                              ? "bg-surface-muted/60 text-ink"
+                              : "bg-surface text-ink-muted",
+                            !t.isFinal && "opacity-60",
+                          )}
+                        >
+                          {t.text}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+                <StatusMessage phase={phase} status={status} />
+                {phase.kind === "error" && (
+                  <p className="max-w-[260px] text-[12px] leading-[1.5] text-danger" role="alert">
+                    {phase.message}
+                  </p>
                 )}
-              >
-                {isMicMuted ? <IconMicOff /> : <IconMic />}
-                {isMicMuted ? "Muted" : "Mic on"}
-              </button>
+              </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {phase.kind === "idle" || phase.kind === "error" ? (
-              <>
+          {/* ── Footer controls ── */}
+          <div className="flex items-center justify-between border-t border-rule px-4 py-3">
+            <div className="flex items-center gap-2">
+              {phase.kind === "live" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const s = sessionRef.current;
+                    if (!s) return;
+                    s.toggleMicMute();
+                    setIsMicMuted(s.isMicMuted);
+                  }}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-[6px] border transition-colors",
+                    isMicMuted
+                      ? "border-danger/30 bg-danger-soft text-danger"
+                      : "border-rule text-ink-muted hover:border-rule-strong hover:text-ink",
+                  )}
+                  aria-label={isMicMuted ? "Unmute microphone" : "Mute microphone"}
+                  title={isMicMuted ? "Unmute" : "Mute"}
+                >
+                  {isMicMuted ? <IconMicOff /> : <IconMic />}
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {phase.kind === "error" ? (
+                <button
+                  type="button"
+                  onClick={() => void joinNewSession(() => false)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-ink px-3 text-[12px] font-medium text-canvas transition-colors hover:bg-ink-hover"
+                >
+                  Try again
+                </button>
+              ) : phase.kind === "live" ? (
+                <button
+                  type="button"
+                  onClick={() => void end()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-danger/20 bg-danger-soft px-3 text-[12px] font-medium text-danger transition-colors hover:bg-danger-soft/70"
+                >
+                  <IconEnd /> End call
+                </button>
+              ) : phase.kind === "done" ? (
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/orgs/${orgSlug}/calls/${phase.callId}`}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-ink px-3 text-[12px] font-medium text-canvas transition-colors hover:bg-ink-hover"
+                  >
+                    Review call
+                  </a>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex h-8 items-center rounded-[6px] border border-rule px-3 text-[12px] font-medium text-ink-muted transition-colors hover:border-rule-strong hover:text-ink"
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : canCloseNow ? (
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex h-9 items-center rounded-[6px] px-3 text-[13px] font-medium text-ink-muted hover:text-ink"
+                  className="inline-flex h-8 items-center rounded-[6px] border border-rule px-3 text-[12px] font-medium text-ink-muted transition-colors hover:border-rule-strong hover:text-ink"
                 >
                   Close
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void start()}
-                  className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-ink px-4 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
-                >
-                  {phase.kind === "error" ? "Try again" : "Start"}
-                </button>
-              </>
-            ) : phase.kind === "live" ? (
-              <button
-                type="button"
-                onClick={() => void end()}
-                className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-danger-soft px-4 text-[13px] font-medium text-danger transition-colors hover:bg-danger-soft/70"
-              >
-                <IconEnd /> End call
-              </button>
-            ) : phase.kind === "ending" ? (
-              <span className="inline-flex items-center gap-2 text-[13px] text-ink-muted">
-                <PulseDots small /> Saving transcript…
-              </span>
-            ) : phase.kind === "done" ? (
-              <>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="inline-flex h-9 items-center rounded-[6px] border border-rule bg-surface px-4 text-[13px] font-medium text-ink hover:border-rule-strong"
-                >
-                  Close
-                </button>
-                <a
-                  href={`/orgs/${orgSlug}/calls/${phase.callId}`}
-                  className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-ink px-4 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
-                >
-                  Review call
-                </a>
-              </>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
 /* ────────── Subcomponents ────────── */
 
-function Center({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center py-12 text-center">
-      {children}
-    </div>
-  );
-}
-
-function PulseDots({ small }: { small?: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className={cn(
-            "animate-pulse rounded-full bg-ink-subtle",
-            small ? "size-1.5" : "size-2",
-          )}
-          style={{ animationDelay: `${i * 140}ms` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Voice orb — a 5-bar waveform that animates differently for each agent
- * status. The visual ties the dialog to the "voice" product idea and gives
- * the user immediate feedback that audio is flowing (or not).
- */
-function VoiceOrb({
-  status,
-  phase,
-}: {
-  status: UltravoxSessionStatus;
-  phase: Phase["kind"];
-}) {
-  const active =
-    phase === "live" &&
-    (status === UltravoxSessionStatus.LISTENING ||
-      status === UltravoxSessionStatus.THINKING ||
-      status === UltravoxSessionStatus.SPEAKING);
-
-  const speaking = status === UltravoxSessionStatus.SPEAKING;
-  const thinking = status === UltravoxSessionStatus.THINKING;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex size-11 shrink-0 items-center justify-center rounded-[10px] border transition-colors",
-        active
-          ? "border-accent/30 bg-accent-soft"
-          : "border-rule bg-surface-muted",
-      )}
-      aria-hidden
-    >
-      <span className="flex h-5 items-end gap-[3px]">
-        {[0.35, 0.7, 1, 0.7, 0.35].map((h, i) => (
-          <span
-            key={i}
-            className={cn(
-              "w-[3px] rounded-[1px]",
-              active ? "bg-accent" : "bg-ink-subtle/60",
-              active && "wave-bar",
-            )}
-            style={{
-              height: `${h * 20}px`,
-              animationDelay: active ? `${i * 90}ms` : undefined,
-              animationDuration: speaking
-                ? "0.7s"
-                : thinking
-                  ? "1.4s"
-                  : "1s",
-            }}
-          />
-        ))}
-      </span>
-    </span>
-  );
-}
-
-function StatusPill({
+function StatusDot({
   phase,
   status,
-  elapsed,
 }: {
   phase: Phase;
   status: UltravoxSessionStatus;
-  elapsed: number;
 }) {
-  const { label, tone } = describePhase(phase, status);
+  const { tone } = describePhase(phase, status);
   return (
-    <div className="flex items-center gap-3">
-      {phase.kind === "live" && (
-        <span className="font-mono text-[12px] tabular-nums text-ink-muted">
-          {formatDuration(elapsed)}
-        </span>
+    <span
+      className={cn(
+        "inline-block size-2 rounded-full",
+        tone === "live" && "bg-accent",
+        tone === "muted" && "bg-ink-subtle/40",
+        tone === "danger" && "bg-danger",
       )}
-      <span
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em]",
-          tone === "live" && "border-accent/20 bg-accent-soft text-accent",
-          tone === "muted" && "border-rule bg-surface-muted text-ink-muted",
-          tone === "danger" && "border-danger/20 bg-danger-soft text-danger",
-        )}
-      >
-        {tone === "live" && (
-          <span className="relative inline-flex size-1.5">
-            <span className="absolute size-1.5 rounded-full bg-accent" />
-            <span className="absolute size-3 -translate-x-[3px] -translate-y-[3px] animate-ping rounded-full bg-accent/30" />
-          </span>
-        )}
-        {label}
-      </span>
+    />
+  );
+}
+
+function StatusMessage({
+  phase,
+  status,
+}: {
+  phase: Phase;
+  status: UltravoxSessionStatus;
+}) {
+  let text = "";
+  if (phase.kind === "idle" || phase.kind === "starting") text = "Connecting to agent…";
+  else if (phase.kind === "error") text = "Call couldn't start";
+  else if (phase.kind === "live") {
+    if (status === UltravoxSessionStatus.LISTENING) text = "Listening — go ahead";
+    else if (status === UltravoxSessionStatus.SPEAKING) text = "Agent is speaking";
+    else if (status === UltravoxSessionStatus.THINKING) text = "Thinking…";
+    else text = "Connecting…";
+  }
+  if (!text) return null;
+  return <p className="text-[13px] text-ink-muted">{text}</p>;
+}
+
+function PulseDots() {
+  return (
+    <div className="flex items-center gap-1">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="size-1.5 animate-pulse rounded-full bg-ink-subtle"
+          style={{ animationDelay: `${i * 140}ms` }}
+        />
+      ))}
     </div>
   );
 }
@@ -490,86 +509,17 @@ function describePhase(
   status: UltravoxSessionStatus,
 ): { label: string; tone: "live" | "muted" | "danger" } {
   if (phase.kind === "error") return { label: "Error", tone: "danger" };
-  if (phase.kind === "starting")
-    return { label: "Connecting", tone: "muted" };
+  if (phase.kind === "starting") return { label: "Connecting", tone: "muted" };
   if (phase.kind === "ending") return { label: "Saving", tone: "muted" };
   if (phase.kind === "done") return { label: "Ended", tone: "muted" };
   if (phase.kind === "live") {
-    if (status === UltravoxSessionStatus.LISTENING)
-      return { label: "Listening", tone: "live" };
-    if (status === UltravoxSessionStatus.THINKING)
-      return { label: "Thinking", tone: "live" };
-    if (status === UltravoxSessionStatus.SPEAKING)
-      return { label: "Speaking", tone: "live" };
-    if (status === UltravoxSessionStatus.IDLE)
-      return { label: "Waiting", tone: "live" };
+    if (status === UltravoxSessionStatus.LISTENING) return { label: "Listening", tone: "live" };
+    if (status === UltravoxSessionStatus.THINKING) return { label: "Thinking", tone: "live" };
+    if (status === UltravoxSessionStatus.SPEAKING) return { label: "Speaking", tone: "live" };
+    if (status === UltravoxSessionStatus.IDLE) return { label: "Waiting", tone: "live" };
     return { label: "Connecting", tone: "muted" };
   }
   return { label: "Idle", tone: "muted" };
-}
-
-function TranscriptList({
-  transcripts,
-  phase,
-  status,
-}: {
-  transcripts: Transcript[];
-  phase: "live" | "ending" | "done";
-  status: UltravoxSessionStatus;
-}) {
-  if (transcripts.length === 0) {
-    return (
-      <Center>
-        <PulseDots />
-        <p className="mt-4 text-[13px] text-ink-muted">
-          {phase === "live" && status === UltravoxSessionStatus.LISTENING
-            ? "Say something — the agent is listening."
-            : phase === "live"
-              ? "Hang tight, the agent is connecting…"
-              : "No transcript captured."}
-        </p>
-      </Center>
-    );
-  }
-
-  return (
-    <ol className="flex flex-col gap-3.5">
-      {transcripts.map((t, i) => {
-        const isAgent = t.speaker === Role.AGENT;
-        return (
-          <li
-            key={`${t.ordinal}-${i}`}
-            className={cn(
-              "flex items-start gap-3",
-              isAgent ? "" : "flex-row-reverse",
-            )}
-          >
-            <span
-              className={cn(
-                "mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-[5px] border text-[9px] font-medium uppercase tracking-[0.06em]",
-                isAgent
-                  ? "border-rule bg-surface text-ink"
-                  : "border-rule bg-surface-muted text-ink-muted",
-              )}
-            >
-              {isAgent ? "AG" : "YOU"}
-            </span>
-            <p
-              className={cn(
-                "max-w-[82%] rounded-[10px] border px-3.5 py-2 text-[13px] leading-[1.55]",
-                isAgent
-                  ? "border-rule bg-surface-muted/60 text-ink"
-                  : "border-rule bg-surface text-ink-muted",
-                !t.isFinal && "opacity-70",
-              )}
-            >
-              {t.text}
-            </p>
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 function formatDuration(totalSec: number) {
@@ -580,24 +530,19 @@ function formatDuration(totalSec: number) {
 
 /* ────────── Icons ────────── */
 
+function IconChevron() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconMic() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <rect
-        x="5.25"
-        y="1.5"
-        width="3.5"
-        height="7"
-        rx="1.75"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-      <path
-        d="M2.5 7A4.5 4.5 0 0 0 11.5 7M7 11.5v1.25M4.5 12.75h5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
+      <rect x="5.25" y="1.5" width="3.5" height="7" rx="1.75" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 7A4.5 4.5 0 0 0 11.5 7M7 11.5v1.25M4.5 12.75h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -605,27 +550,9 @@ function IconMic() {
 function IconMicOff() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M2 2L12 12"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-      <rect
-        x="5.25"
-        y="1.5"
-        width="3.5"
-        height="7"
-        rx="1.75"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
-      <path
-        d="M2.5 7A4.5 4.5 0 0 0 11.5 7"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
+      <path d="M2 2L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <rect x="5.25" y="1.5" width="3.5" height="7" rx="1.75" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 7A4.5 4.5 0 0 0 11.5 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -633,22 +560,7 @@ function IconMicOff() {
 function IconEnd() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
-      <path
-        d="M2 7.5C2 6.5 3 5 7 5s5 1.5 5 2.5V9.5c0 .5-.4 1-1 1H9.5a1 1 0 0 1-1-1V8.5c-.5-.3-1.2-.5-1.5-.5-.3 0-1 .2-1.5.5v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconAlert() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
-      <path d="M9 2L16 15H2L9 2Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M9 7V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <circle cx="9" cy="12.5" r="0.6" fill="currentColor" />
+      <path d="M2 7.5C2 6.5 3 5 7 5s5 1.5 5 2.5V9.5c0 .5-.4 1-1 1H9.5a1 1 0 0 1-1-1V8.5c-.5-.3-1.2-.5-1.5-.5-.3 0-1 .2-1.5.5v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -33,7 +33,7 @@ export default async function AgentsPage({
         actions={
           <Link
             href={`/orgs/${tenant.orgSlug}/agents/new`}
-            className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
+            className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink-hover"
           >
             New agent
             <ArrowRight />
@@ -49,7 +49,7 @@ export default async function AgentsPage({
           action={
             <Link
               href={`/orgs/${tenant.orgSlug}/agents/new`}
-              className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-ink px-5 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f]"
+              className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-ink px-5 text-[13px] font-medium text-canvas transition-colors hover:bg-ink-hover"
             >
               Draft your first agent
               <ArrowRight />

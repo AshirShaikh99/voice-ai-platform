@@ -67,6 +67,10 @@ model Call {
   durationSec       Int?
   /// Array of { speaker, text, isFinal, ordinal } objects captured at end.
   transcriptJson    Json?
+  /// Ultravox one-liner. Null until fetched from Ultravox after call ends.
+  shortSummary      String?    @db.Text
+  /// Ultravox detailed summary. Null until fetched from Ultravox after call ends.
+  summary           String?    @db.Text
   /// Summary / notes left by a reviewer, if any.
   reviewNote        String?    @db.Text
 

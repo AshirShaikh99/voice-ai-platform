@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 
 // Lazy-load the TestCallDialog and everything it pulls in (`ultravox-client`,
@@ -18,6 +19,8 @@ type Props = {
   orgSlug: string;
   agentId: string;
   agentName: string;
+  agentVoice: string;
+  openingLine: string | null;
   canCall: boolean;
 };
 
@@ -25,6 +28,8 @@ export function AgentDetailClient({
   orgSlug,
   agentId,
   agentName,
+  agentVoice,
+  openingLine,
   canCall,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -40,20 +45,24 @@ export function AgentDetailClient({
             ? "Speak with this agent from your browser"
             : "Agent is not connected to the runtime"
         }
-        className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-[#2f2f2f] disabled:cursor-not-allowed disabled:opacity-40"
+        className="inline-flex h-8 items-center gap-2 rounded-[6px] bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-40"
       >
         <IconPhone />
         Start test call
       </button>
 
-      {open && (
-        <TestCallDialog
-          orgSlug={orgSlug}
-          agentId={agentId}
-          agentName={agentName}
-          onClose={() => setOpen(false)}
-        />
-      )}
+      {open &&
+        createPortal(
+          <TestCallDialog
+            orgSlug={orgSlug}
+            agentId={agentId}
+            agentName={agentName}
+            agentVoice={agentVoice}
+            openingLine={openingLine}
+            onClose={() => setOpen(false)}
+          />,
+          document.body,
+        )}
     </>
   );
 }
