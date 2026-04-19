@@ -76,6 +76,28 @@ export default async function CallReviewPage({
         </Card>
       )}
 
+      {/* Recording — always attempt playback for ended calls; route 404s if not ready */}
+      {call.status === "ENDED" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recording</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <audio
+              controls
+              preload="none"
+              src={`/orgs/${tenant.orgSlug}/calls/${call.id}/recording`}
+              className="w-full"
+            >
+              Your browser doesn&apos;t support audio playback.
+            </audio>
+            <p className="mt-2 text-[12px] text-ink-subtle">
+              Audio is streamed fresh from Ultravox each time you play it.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <Card>
           <CardHeader>

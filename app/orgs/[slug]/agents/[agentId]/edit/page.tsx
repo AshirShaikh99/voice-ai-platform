@@ -53,6 +53,12 @@ export default async function EditAgentPage({
           voice: agent.voice,
           temperature: agent.temperature,
           openingLine: agent.openingLine,
+          languageHint: agent.languageHint,
+          enableHangUp: agent.enableHangUp,
+          enableTransfer: agent.enableTransfer,
+          enableVoicemail: agent.enableVoicemail,
+          enablePlayDtmf: agent.enablePlayDtmf,
+          transferPhoneNumber: agent.transferPhoneNumber,
         }}
       />
     </div>

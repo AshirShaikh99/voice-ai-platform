@@ -152,6 +152,218 @@ export const listFeaturedVoices = cache(async (): Promise<UltravoxVoice[]> => {
 });
 
 /* ────────────────────────────────────────────────────────────────
+   Corpora — RAG knowledge bases
+   ──────────────────────────────────────────────────────────────── */
+
+export type UltravoxCorpus = {
+  corpusId: string;
+  name: string;
+  description?: string;
+  created?: string;
+};
+
+export type UltravoxCorpusSource = {
+  sourceId: string;
+  name?: string;
+  stats?: {
+    status?:
+      | "SOURCE_STATUS_UNSPECIFIED"
+      | "SOURCE_STATUS_INITIALIZING"
+      | "SOURCE_STATUS_READY"
+      | "SOURCE_STATUS_UPDATING";
+  };
+  crawl?: { startUrls?: string[]; maxDepth?: number; maxDocuments?: number };
+  upload?: { fileName?: string };
+};
+
+export async function createUltravoxCorpus(input: {
+  name: string;
+  description?: string;
+}): Promise<UltravoxCorpus> {
+  return ultravoxFetch<UltravoxCorpus>("/corpora", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+    }),
+  });
+}
+
+export async function deleteUltravoxCorpus(corpusId: string): Promise<void> {
+  await ultravoxFetch<void>(`/corpora/${corpusId}`, { method: "DELETE" });
+}
+
+export async function addUltravoxCorpusUrlSource(
+  corpusId: string,
+  input: { name: string; startUrls: string[]; maxDepth?: number; maxDocuments?: number },
+): Promise<UltravoxCorpusSource> {
+  return ultravoxFetch<UltravoxCorpusSource>(
+    `/corpora/${corpusId}/sources`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        crawl: {
+          startUrls: input.startUrls,
+          maxDepth: input.maxDepth ?? 1,
+          maxDocuments: input.maxDocuments ?? 50,
+        },
+      }),
+    },
+  );
+}
+
+export async function listUltravoxCorpusSources(
+  corpusId: string,
+): Promise<UltravoxCorpusSource[]> {
+  const data = await ultravoxFetch<{ results?: UltravoxCorpusSource[] }>(
+    `/corpora/${corpusId}/sources`,
+  );
+  return data.results ?? [];
+}
+
+/**
+ * Step 1 of the file upload flow: request a short-lived presigned URL.
+ * The caller then PUTs raw bytes to `presignedUrl` with the right Content-Type.
+ */
+export async function requestUltravoxCorpusUpload(
+  corpusId: string,
+  input: { fileName: string; mimeType: string },
+): Promise<{ documentId: string; presignedUrl: string }> {
+  return ultravoxFetch<{ documentId: string; presignedUrl: string }>(
+    `/corpora/${corpusId}/uploads`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Tools — shapes passed to Ultravox via `selectedTools`
+   ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Ultravox supports three tool shapes in `selectedTools`:
+ *   1. `{ toolName }` — references a built-in tool (hangUp, coldTransfer,
+ *      leaveVoicemail, playDtmfSounds, queryCorpus).
+ *   2. `{ toolId }` — references a tool previously persisted via /api/tools.
+ *   3. `{ temporaryTool }` — inline spec used only for the current call/agent.
+ *
+ * We use #1 for built-in toggles and #3 for user-defined HTTP tools so we
+ * don't have to manage tool CRUD on Ultravox's side in addition to our own.
+ */
+export type ToolParameter = {
+  name: string;
+  /// JSON-schema "type" field: string, number, boolean, integer.
+  type: "string" | "number" | "boolean" | "integer";
+  description: string;
+  required: boolean;
+};
+
+export type TemporaryTool = {
+  modelToolName: string;
+  description: string;
+  dynamicParameters?: Array<{
+    name: string;
+    location: "PARAMETER_LOCATION_BODY" | "PARAMETER_LOCATION_QUERY";
+    schema: {
+      type: ToolParameter["type"];
+      description: string;
+    };
+    required: boolean;
+  }>;
+  http?: {
+    baseUrlPattern: string;
+    httpMethod: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    headers?: Record<string, string>;
+  };
+};
+
+export type SelectedTool =
+  | { toolName: string }
+  | { toolId: string }
+  | {
+      temporaryTool: TemporaryTool;
+      /// Optional per-call param overrides. Rarely needed.
+      parameterOverrides?: Record<string, unknown>;
+    };
+
+/** Shape of a user-defined HTTP tool in our DB. */
+export type CustomToolInput = {
+  name: string;
+  description: string;
+  url: string;
+  httpMethod?: string;
+  headers?: Record<string, string> | null;
+  parameters?: ToolParameter[] | null;
+};
+
+/** Build the full `selectedTools` array from agent config. */
+export function buildSelectedTools(config: {
+  enableHangUp: boolean;
+  enableTransfer: boolean;
+  transferPhoneNumber?: string | null;
+  enableVoicemail: boolean;
+  enablePlayDtmf: boolean;
+  customTools?: CustomToolInput[];
+  /// Ultravox corpus IDs to expose via the built-in queryCorpus tool.
+  corpusIds?: string[];
+}): SelectedTool[] {
+  const tools: SelectedTool[] = [];
+  if (config.enableHangUp) tools.push({ toolName: "hangUp" });
+  if (config.enableTransfer && config.transferPhoneNumber) {
+    tools.push({
+      toolName: "coldTransfer",
+      // Ultravox reads `destination` via parameterOverrides for coldTransfer.
+      parameterOverrides: { destination: config.transferPhoneNumber },
+    } as SelectedTool);
+  }
+  if (config.enableVoicemail) tools.push({ toolName: "leaveVoicemail" });
+  if (config.enablePlayDtmf) tools.push({ toolName: "playDtmfSounds" });
+
+  for (const id of config.corpusIds ?? []) {
+    tools.push({
+      toolName: "queryCorpus",
+      parameterOverrides: { corpus_id: id, max_results: 5 },
+    } as SelectedTool);
+  }
+
+  for (const t of config.customTools ?? []) {
+    tools.push({ temporaryTool: buildTemporaryTool(t) });
+  }
+  return tools;
+}
+
+function buildTemporaryTool(t: CustomToolInput): TemporaryTool {
+  const method = (t.httpMethod ?? "POST").toUpperCase() as
+    | "GET"
+    | "POST"
+    | "PUT"
+    | "PATCH"
+    | "DELETE";
+  const params = (t.parameters ?? []).map((p) => ({
+    name: p.name,
+    location:
+      method === "GET"
+        ? ("PARAMETER_LOCATION_QUERY" as const)
+        : ("PARAMETER_LOCATION_BODY" as const),
+    schema: { type: p.type, description: p.description },
+    required: p.required,
+  }));
+  return {
+    modelToolName: t.name,
+    description: t.description,
+    dynamicParameters: params.length > 0 ? params : undefined,
+    http: {
+      baseUrlPattern: t.url,
+      httpMethod: method,
+      headers: t.headers ?? undefined,
+    },
+  };
+}
+
+/* ────────────────────────────────────────────────────────────────
    Agents — CRUD
    ──────────────────────────────────────────────────────────────── */
 
@@ -160,19 +372,27 @@ type CallTemplate = {
   voice?: string;
   temperature?: number;
   model?: string;
+  languageHint?: string;
+  selectedTools?: SelectedTool[];
   firstSpeakerSettings?: {
     agent?: { text: string };
   };
   recordingEnabled?: boolean;
 };
 
-export async function createUltravoxAgent(input: {
+export type AgentUpsertInput = {
   name: string;
   systemPrompt: string;
   voice: string;
   temperature: number;
   openingLine?: string;
-}): Promise<UltravoxAgent> {
+  languageHint?: string | null;
+  selectedTools?: SelectedTool[];
+};
+
+export async function createUltravoxAgent(
+  input: AgentUpsertInput,
+): Promise<UltravoxAgent> {
   const callTemplate: CallTemplate = {
     systemPrompt: input.systemPrompt,
     voice: input.voice,
@@ -185,6 +405,9 @@ export async function createUltravoxAgent(input: {
       agent: { text: input.openingLine },
     };
   }
+  if (input.languageHint) callTemplate.languageHint = input.languageHint;
+  if (input.selectedTools && input.selectedTools.length > 0)
+    callTemplate.selectedTools = input.selectedTools;
 
   return ultravoxFetch<UltravoxAgent>("/agents", {
     method: "POST",
@@ -203,6 +426,8 @@ export async function updateUltravoxAgent(
     voice?: string;
     temperature?: number;
     openingLine?: string | null;
+    languageHint?: string | null;
+    selectedTools?: SelectedTool[];
   },
 ): Promise<UltravoxAgent> {
   const callTemplate: Partial<CallTemplate> = {};
@@ -216,6 +441,10 @@ export async function updateUltravoxAgent(
       ? { agent: { text: patch.openingLine } }
       : undefined;
   }
+  if (patch.languageHint !== undefined)
+    callTemplate.languageHint = patch.languageHint ?? undefined;
+  if (patch.selectedTools !== undefined)
+    callTemplate.selectedTools = patch.selectedTools;
 
   const body: Record<string, unknown> = {};
   if (patch.name !== undefined) body.name = patch.name;
@@ -245,16 +474,30 @@ export async function createUltravoxCall(
     metadata?: Record<string, string>;
     maxDurationSec?: number;
     templateContext?: Record<string, string>;
+    /// Set `twilio` for outbound Twilio calls. Default is WebRTC.
+    medium?: "webrtc" | "twilio";
+    /// Override which speaker goes first. Defaults vary per medium: for
+    /// outbound phone calls we recommend "user" (wait for pickup).
+    firstSpeaker?: "agent" | "user";
+    /// Append to the template's selectedTools for this single call.
+    extraSelectedTools?: SelectedTool[];
   } = {},
 ): Promise<UltravoxCall> {
+  const body: Record<string, unknown> = {
+    maxDuration: `${opts.maxDurationSec ?? 600}s`,
+    recordingEnabled: true,
+    metadata: opts.metadata,
+    templateContext: opts.templateContext,
+  };
+  if (opts.medium === "twilio") body.medium = { twilio: {} };
+  if (opts.firstSpeaker === "user") body.firstSpeakerSettings = { user: {} };
+  if (opts.firstSpeaker === "agent") body.firstSpeakerSettings = { agent: {} };
+  if (opts.extraSelectedTools && opts.extraSelectedTools.length > 0)
+    body.selectedTools = opts.extraSelectedTools;
+
   return ultravoxFetch<UltravoxCall>(`/agents/${ultravoxAgentId}/calls`, {
     method: "POST",
-    body: JSON.stringify({
-      maxDuration: `${opts.maxDurationSec ?? 600}s`,
-      recordingEnabled: true,
-      metadata: opts.metadata,
-      templateContext: opts.templateContext,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -262,6 +505,44 @@ export async function getUltravoxCall(
   ultravoxCallId: string,
 ): Promise<UltravoxCall & { transcript?: UltravoxTranscriptLine[] }> {
   return ultravoxFetch(`/calls/${ultravoxCallId}`);
+}
+
+/**
+ * Return the public, short-lived URL to the call's recorded audio, or null if
+ * recording wasn't enabled / isn't ready yet. Ultravox returns a 302 redirect
+ * to the actual audio; we capture the Location header without following it so
+ * the browser `<audio>` element can fetch it directly.
+ */
+export async function getUltravoxRecordingUrl(
+  ultravoxCallId: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `${BASE_URL}/calls/${ultravoxCallId}/recording`,
+    {
+      method: "GET",
+      headers: { "X-API-Key": apiKey() },
+      redirect: "manual",
+      cache: "no-store",
+    },
+  );
+  if (res.status === 302 || res.status === 301) {
+    return res.headers.get("location");
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new UltravoxError(
+      `Ultravox recording fetch failed (${res.status})`,
+      res.status,
+    );
+  }
+  // Rare: some deployments return JSON { url }.
+  const body = await res.text();
+  try {
+    const parsed = JSON.parse(body) as { url?: string };
+    return parsed.url ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AgentDetailClient } from "@/components/app/agent-detail-client";
+import { AgentKnowledgePicker } from "@/components/app/agent-knowledge-picker";
+import { AgentToolsManager } from "@/components/app/agent-tools-manager";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -21,15 +23,28 @@ export default async function AgentDetailPage({
   const { slug, agentId } = await params;
   const tenant = await requireTenant(slug);
 
-  const agent = await db.agent.findFirst({
-    where: { id: agentId, organizationId: tenant.organizationId },
-    include: {
-      calls: {
-        orderBy: { startedAt: "desc" },
-        take: 10,
+  const [agent, allKnowledgeBases] = await Promise.all([
+    db.agent.findFirst({
+      where: { id: agentId, organizationId: tenant.organizationId },
+      include: {
+        calls: {
+          orderBy: { startedAt: "desc" },
+          take: 10,
+        },
+        tools: {
+          orderBy: { createdAt: "asc" },
+        },
+        knowledgeBases: {
+          select: { id: true, name: true },
+        },
       },
-    },
-  });
+    }),
+    db.knowledgeBase.findMany({
+      where: { organizationId: tenant.organizationId },
+      include: { _count: { select: { sources: true } } },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   if (!agent) notFound();
 
@@ -172,6 +187,36 @@ export default async function AgentDetailPage({
 
           <Card>
             <CardHeader>
+              <CardTitle>Capabilities</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2 text-[13px] text-ink-muted">
+              {[
+                { on: agent.enableHangUp, label: "Hang up" },
+                { on: agent.enableTransfer, label: "Cold transfer" },
+                { on: agent.enableVoicemail, label: "Leave voicemail" },
+                { on: agent.enablePlayDtmf, label: "Play DTMF" },
+              ].map((cap) => (
+                <div
+                  key={cap.label}
+                  className="flex items-center justify-between"
+                >
+                  <span>{cap.label}</span>
+                  <Badge tone={cap.on ? "accent" : "muted"}>
+                    {cap.on ? "On" : "Off"}
+                  </Badge>
+                </div>
+              ))}
+              {agent.languageHint && (
+                <div className="flex items-center justify-between pt-1">
+                  <span>Language</span>
+                  <span className="text-ink">{agent.languageHint}</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>System prompt</CardTitle>
             </CardHeader>
             <CardContent>
@@ -181,6 +226,43 @@ export default async function AgentDetailPage({
             </CardContent>
           </Card>
         </div>
+      </section>
+
+      <section>
+        <Card>
+          <CardContent className="p-0">
+            <AgentKnowledgePicker
+              orgSlug={tenant.orgSlug}
+              agentId={agent.id}
+              allBases={allKnowledgeBases.map((kb) => ({
+                id: kb.id,
+                name: kb.name,
+                sourceCount: kb._count.sources,
+              }))}
+              attachedIds={agent.knowledgeBases.map((kb) => kb.id)}
+            />
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card>
+          <CardContent className="p-0">
+            <AgentToolsManager
+              orgSlug={tenant.orgSlug}
+              agentId={agent.id}
+              tools={agent.tools.map((t) => ({
+                id: t.id,
+                name: t.name,
+                description: t.description,
+                url: t.url,
+                httpMethod: t.httpMethod,
+                parametersJson: t.parametersJson,
+                headersJson: t.headersJson,
+              }))}
+            />
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

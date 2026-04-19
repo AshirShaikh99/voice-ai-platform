@@ -28,8 +28,51 @@ model Organization {
   agents          Agent[]
   calls           Call[]
   activityLogs    ActivityLog[]
+  telephonyAccount TelephonyAccount?
+  phoneNumbers    PhoneNumber[]
+  knowledgeBases  KnowledgeBase[]
+  webhookEndpoints WebhookEndpoint[]
+  campaigns       Campaign[]
 
   @@index([slug])
+}
+
+/// Per-org telephony provider credentials. Auth token is encrypted at rest.
+model TelephonyAccount {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  provider       String   @default("twilio")
+  /// Twilio Account SID (public identifier — stored plaintext).
+  accountSid     String
+  /// Encrypted Twilio auth token (AES-256-GCM with APP_ENCRYPTION_KEY).
+  authTokenEnc   String   @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Phone numbers owned/managed by an organization for inbound/outbound calls.
+model PhoneNumber {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// E.164 format, e.g. "+15551234567".
+  e164           String   @unique
+  label          String?
+  provider       String   @default("twilio")
+  /// Twilio Phone Number SID (PN...) — null for numbers added by hand.
+  providerSid    String?
+  /// Agent that answers inbound calls on this number. Null = not configured.
+  inboundAgentId String?
+  /// True once we've pointed Twilio's voiceUrl at our /api/twilio/voice handler.
+  inboundWebhookSet Boolean @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboundAgent Agent?       @relation("InboundNumbers", fields: [inboundAgentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
 }
 
 model Agent {
@@ -40,6 +83,15 @@ model Agent {
   openingLine      String?  @db.Text
   voice            String   @default("Jessica")
   temperature      Float    @default(0.3)
+  /// BCP47 language hint for the speech model, e.g. "en-US", "es-MX". Null = auto.
+  languageHint     String?
+  /// Built-in tool toggles. Map to Ultravox `selectedTools` built-in tool names.
+  enableHangUp     Boolean  @default(true)
+  enableTransfer   Boolean  @default(false)
+  enableVoicemail  Boolean  @default(false)
+  enablePlayDtmf   Boolean  @default(false)
+  /// E.164 destination number for coldTransfer built-in tool. Required if enableTransfer.
+  transferPhoneNumber String?
   /// Ultravox agent id — null until first successful publish to Ultravox.
   ultravoxAgentId  String?  @unique
   createdAt        DateTime @default(now())
@@ -47,9 +99,38 @@ model Agent {
 
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   calls            Call[]
+  tools            AgentTool[]
+  inboundNumbers   PhoneNumber[]   @relation("InboundNumbers")
+  knowledgeBases   KnowledgeBase[] @relation("AgentKnowledge")
+  campaigns        Campaign[]
 
   @@index([organizationId])
   @@index([organizationId, createdAt])
+}
+
+/// User-defined HTTP tool the agent can call mid-conversation.
+/// Passed to Ultravox as a `temporaryTool` in `selectedTools` at call creation.
+model AgentTool {
+  id             String   @id @default(cuid())
+  agentId        String
+  /// Function name exposed to the model. Snake_case, e.g. "check_availability".
+  name           String
+  /// Natural language description — the model reads this to decide when to call.
+  description    String   @db.Text
+  /// Destination URL. Ultravox posts to this when the tool is invoked.
+  url            String
+  httpMethod     String   @default("POST")
+  /// Optional headers to attach to every call (e.g. { "Authorization": "Bearer ..." }).
+  headersJson    Json?
+  /// Array of { name, type, description, required } objects describing the call schema.
+  parametersJson Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  agent          Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@unique([agentId, name])
 }
 
 model Call {
@@ -73,12 +154,29 @@ model Call {
   summary           String?    @db.Text
   /// Summary / notes left by a reviewer, if any.
   reviewNote        String?    @db.Text
+  /// Ultravox-hosted recording URL. Populated by the call.ended webhook.
+  recordingUrl      String?    @db.Text
+  /// Ultravox `endReason` — e.g. "hangup", "timeout", "transfer".
+  endReason         String?
+  /// WEB = browser test call, OUTBOUND = phone call placed by us,
+  /// INBOUND = phone call received on one of our numbers.
+  direction         CallDirection @default(WEB)
+  /// Caller number (E.164). Populated for INBOUND; optionally for OUTBOUND.
+  fromNumber        String?
+  /// Callee number (E.164). Populated for OUTBOUND/INBOUND.
+  toNumber          String?
+  /// Twilio Call SID for phone calls. Null for WEB.
+  twilioCallSid     String?    @unique
+  /// If this call was placed as part of a campaign, the target that owns it.
+  campaignTargetId  String?    @unique
 
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   agent             Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  campaignTarget    CampaignTarget? @relation(fields: [campaignTargetId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, startedAt])
   @@index([agentId, startedAt])
+  @@index([direction, startedAt])
 }
 
 enum CallStatus {
@@ -86,6 +184,137 @@ enum CallStatus {
   ACTIVE
   ENDED
   FAILED
+}
+
+enum CallDirection {
+  WEB
+  OUTBOUND
+  INBOUND
+}
+
+/// A set of documents (URLs or files) that an agent can query at runtime via
+/// Ultravox's built-in `queryCorpus` tool. One knowledge base = one Ultravox corpus.
+model KnowledgeBase {
+  id               String   @id @default(cuid())
+  organizationId   String
+  name             String
+  description      String?  @db.Text
+  /// Ultravox corpus id — null until first successful publish.
+  ultravoxCorpusId String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sources      KnowledgeSource[]
+  agents       Agent[]           @relation("AgentKnowledge")
+
+  @@index([organizationId])
+}
+
+/// An individual source (URL crawl or uploaded file) inside a knowledge base.
+model KnowledgeSource {
+  id               String   @id @default(cuid())
+  knowledgeBaseId  String
+  /// "URL" or "FILE"
+  type             String
+  /// For URL sources: the start URL. For FILE: the filename we gave to Ultravox.
+  sourceRef        String   @db.Text
+  label            String?
+  /// Mirrors Ultravox source status: INITIALIZING | READY | UPDATING.
+  status           String   @default("INITIALIZING")
+  /// Ultravox source id (returned from POST /corpora/{id}/sources).
+  ultravoxSourceId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeBaseId])
+}
+
+/// A URL to POST call/agent events to. Customers verify authenticity via
+/// HMAC-SHA256 of the raw body using `signingSecret`.
+model WebhookEndpoint {
+  id             String   @id @default(cuid())
+  organizationId String
+  url            String
+  /// Subscribed event names, e.g. ["call.ended", "agent.created"].
+  eventsJson     Json
+  /// Plaintext signing secret — shared with the customer so they can verify.
+  signingSecret  String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// A batch of outbound calls. Dials up to `concurrency` targets in parallel;
+/// when a call ends, the call.ended webhook picks the next queued target to
+/// keep the pipeline full.
+model Campaign {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  agentId        String
+  /// E.164 number calls go out from. Must be an owned PhoneNumber on this org.
+  fromNumber     String
+  status         CampaignStatus @default(DRAFT)
+  /// Max calls to dial simultaneously.
+  concurrency    Int      @default(3)
+  /// Max times to retry a failed target before marking FAILED.
+  maxAttempts    Int      @default(1)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agent        Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  targets      CampaignTarget[]
+
+  @@index([organizationId, createdAt])
+}
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+}
+
+/// A single phone number in a campaign. `variablesJson` feeds into Ultravox
+/// templateContext so the agent's prompt can address the contact by name.
+model CampaignTarget {
+  id           String @id @default(cuid())
+  campaignId   String
+  /// E.164 destination.
+  toNumber     String
+  contactName  String?
+  variablesJson Json?
+  status       TargetStatus @default(QUEUED)
+  attempts     Int      @default(0)
+  lastError    String?
+  dialedAt     DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  call     Call?
+
+  @@index([campaignId, status])
+}
+
+enum TargetStatus {
+  QUEUED
+  DIALING
+  COMPLETED
+  FAILED
+  SKIPPED
 }
 
 model ActivityLog {

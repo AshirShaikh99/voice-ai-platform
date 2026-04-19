@@ -1,4 +1,5 @@
 import { clerkClient } from "@clerk/nextjs/server";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,33 @@ export default async function SettingsPage({
             v="Always on · Agents answer 24/7"
           />
           <SettingRow k="Timezone" v="America/Los_Angeles" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Developer</CardTitle>
+            <CardDescription>
+              Forward call and agent events to your own systems.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Link
+            href={`/orgs/${tenant.orgSlug}/settings/webhooks`}
+            className="flex items-center justify-between gap-4 rounded-[10px] border border-rule bg-surface px-4 py-3 hover:border-rule-strong"
+          >
+            <div>
+              <div className="text-[13px] font-medium text-ink">
+                Webhooks
+              </div>
+              <div className="text-[12px] text-ink-muted">
+                HMAC-signed outbound POSTs. Subscribe to call and agent events.
+              </div>
+            </div>
+            <span className="text-[13px] text-ink-muted">Manage →</span>
+          </Link>
         </CardContent>
       </Card>
 

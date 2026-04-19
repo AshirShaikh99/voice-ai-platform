@@ -6,7 +6,9 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { requireTenant } from "@/lib/tenant";
+import { dispatchWebhookEvent } from "@/lib/webhook-dispatch";
 import {
+  buildSelectedTools,
   createUltravoxAgent,
   createUltravoxCall,
   deleteUltravoxAgent,
@@ -14,6 +16,8 @@ import {
   getUltravoxCallMessages,
   updateUltravoxAgent,
   UltravoxError,
+  type CustomToolInput,
+  type ToolParameter,
   type UltravoxTranscriptLine,
 } from "@/lib/ultravox";
 
@@ -30,6 +34,24 @@ const AgentDraftSchema = z.object({
   voice: z.string().trim().min(1, "Pick a voice for this agent."),
   openingLine: z.string().trim().max(500).optional().or(z.literal("")),
   temperature: z.coerce.number().min(0).max(1).default(0.3),
+  languageHint: z
+    .string()
+    .trim()
+    .max(10)
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
+  enableHangUp: z.coerce.boolean().default(true),
+  enableTransfer: z.coerce.boolean().default(false),
+  enableVoicemail: z.coerce.boolean().default(false),
+  enablePlayDtmf: z.coerce.boolean().default(false),
+  transferPhoneNumber: z
+    .string()
+    .trim()
+    .max(20)
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
 });
 
 export type AgentActionState =
@@ -56,6 +78,12 @@ export async function createAgentAction(
     voice: formData.get("voice"),
     openingLine: formData.get("openingLine") || undefined,
     temperature: formData.get("temperature") ?? 0.3,
+    languageHint: formData.get("languageHint") || undefined,
+    enableHangUp: formData.get("enableHangUp") === "on",
+    enableTransfer: formData.get("enableTransfer") === "on",
+    enableVoicemail: formData.get("enableVoicemail") === "on",
+    enablePlayDtmf: formData.get("enablePlayDtmf") === "on",
+    transferPhoneNumber: formData.get("transferPhoneNumber") || undefined,
   });
 
   if (!parsed.success) {
@@ -77,6 +105,24 @@ export async function createAgentAction(
       ? data.openingLine
       : undefined;
 
+  if (data.enableTransfer && !data.transferPhoneNumber) {
+    return {
+      status: "error",
+      message:
+        "Add a transfer destination number (E.164 format) before enabling transfers.",
+      fieldErrors: { transferPhoneNumber: "Required when transfer is on." },
+    };
+  }
+
+  const selectedTools = buildSelectedTools({
+    enableHangUp: data.enableHangUp,
+    enableTransfer: data.enableTransfer,
+    transferPhoneNumber: data.transferPhoneNumber ?? null,
+    enableVoicemail: data.enableVoicemail,
+    enablePlayDtmf: data.enablePlayDtmf,
+    customTools: [],
+  });
+
   try {
     // 1. Create on Ultravox FIRST so we only persist agents that have a real runtime.
     const uvAgent = await createUltravoxAgent({
@@ -85,6 +131,8 @@ export async function createAgentAction(
       voice: data.voice,
       temperature: data.temperature,
       openingLine,
+      languageHint: data.languageHint ?? null,
+      selectedTools,
     });
 
     // 2. Persist locally, joined by ultravoxAgentId.
@@ -96,6 +144,12 @@ export async function createAgentAction(
         voice: data.voice,
         temperature: data.temperature,
         openingLine: openingLine ?? null,
+        languageHint: data.languageHint ?? null,
+        enableHangUp: data.enableHangUp,
+        enableTransfer: data.enableTransfer,
+        enableVoicemail: data.enableVoicemail,
+        enablePlayDtmf: data.enablePlayDtmf,
+        transferPhoneNumber: data.transferPhoneNumber ?? null,
         ultravoxAgentId: uvAgent.agentId,
       },
     });
@@ -113,6 +167,12 @@ export async function createAgentAction(
 
     revalidatePath(`/orgs/${tenant.orgSlug}/agents`);
     revalidatePath(`/orgs/${tenant.orgSlug}/dashboard`);
+
+    await dispatchWebhookEvent(tenant.organizationId, "agent.created", {
+      agentId: agent.id,
+      name: agent.name,
+      voice: agent.voice,
+    });
 
     redirect(`/orgs/${tenant.orgSlug}/agents/${agent.id}`);
   } catch (err) {
@@ -146,6 +206,12 @@ export async function updateAgentAction(
     voice: formData.get("voice"),
     openingLine: formData.get("openingLine") || undefined,
     temperature: formData.get("temperature") ?? 0.3,
+    languageHint: formData.get("languageHint") || undefined,
+    enableHangUp: formData.get("enableHangUp") === "on",
+    enableTransfer: formData.get("enableTransfer") === "on",
+    enableVoicemail: formData.get("enableVoicemail") === "on",
+    enablePlayDtmf: formData.get("enablePlayDtmf") === "on",
+    transferPhoneNumber: formData.get("transferPhoneNumber") || undefined,
   });
 
   if (!parsed.success) {
@@ -157,6 +223,7 @@ export async function updateAgentAction(
 
   const existing = await db.agent.findFirst({
     where: { id: agentId, organizationId: tenant.organizationId },
+    include: { tools: true, knowledgeBases: true },
   });
   if (!existing) return { status: "error", message: "Agent not found." };
   if (!existing.ultravoxAgentId)
@@ -171,6 +238,36 @@ export async function updateAgentAction(
       ? data.openingLine
       : undefined;
 
+  if (data.enableTransfer && !data.transferPhoneNumber) {
+    return {
+      status: "error",
+      message:
+        "Add a transfer destination number (E.164 format) before enabling transfers.",
+    };
+  }
+
+  const customTools: CustomToolInput[] = existing.tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    url: t.url,
+    httpMethod: t.httpMethod,
+    headers: (t.headersJson as Record<string, string> | null) ?? null,
+    parameters: (t.parametersJson as ToolParameter[] | null) ?? null,
+  }));
+  const corpusIds = existing.knowledgeBases
+    .map((kb) => kb.ultravoxCorpusId)
+    .filter((id): id is string => Boolean(id));
+
+  const selectedTools = buildSelectedTools({
+    enableHangUp: data.enableHangUp,
+    enableTransfer: data.enableTransfer,
+    transferPhoneNumber: data.transferPhoneNumber ?? null,
+    enableVoicemail: data.enableVoicemail,
+    enablePlayDtmf: data.enablePlayDtmf,
+    customTools,
+    corpusIds,
+  });
+
   try {
     await updateUltravoxAgent(existing.ultravoxAgentId, {
       name: data.name,
@@ -178,6 +275,8 @@ export async function updateAgentAction(
       voice: data.voice,
       temperature: data.temperature,
       openingLine: openingLine ?? null,
+      languageHint: data.languageHint ?? null,
+      selectedTools,
     });
 
     await db.agent.update({
@@ -188,6 +287,12 @@ export async function updateAgentAction(
         voice: data.voice,
         temperature: data.temperature,
         openingLine: openingLine ?? null,
+        languageHint: data.languageHint ?? null,
+        enableHangUp: data.enableHangUp,
+        enableTransfer: data.enableTransfer,
+        enableVoicemail: data.enableVoicemail,
+        enablePlayDtmf: data.enablePlayDtmf,
+        transferPhoneNumber: data.transferPhoneNumber ?? null,
       },
     });
 
@@ -203,6 +308,12 @@ export async function updateAgentAction(
 
     revalidatePath(`/orgs/${tenant.orgSlug}/agents/${agentId}`);
     revalidatePath(`/orgs/${tenant.orgSlug}/agents`);
+
+    await dispatchWebhookEvent(tenant.organizationId, "agent.updated", {
+      agentId,
+      name: data.name,
+    });
+
     return { status: "success", agentId };
   } catch (err) {
     if (isRedirectError(err)) throw err;
@@ -265,6 +376,12 @@ export async function startTestCallAction(
         subject: agent.name,
         metadata: { callId: call.id, agentId: agent.id },
       },
+    });
+
+    await dispatchWebhookEvent(tenant.organizationId, "call.started", {
+      callId: call.id,
+      agentId: agent.id,
+      direction: "WEB",
     });
 
     return { ok: true, callId: call.id, joinUrl: uvCall.joinUrl };
@@ -389,6 +506,11 @@ export async function deleteAgentAction(formData: FormData) {
     },
   });
 
+  await dispatchWebhookEvent(tenant.organizationId, "agent.deleted", {
+    agentId,
+    name: agent.name,
+  });
+
   revalidatePath(`/orgs/${tenant.orgSlug}/agents`);
   redirect(`/orgs/${tenant.orgSlug}/agents`);
 }
@@ -428,6 +550,186 @@ export async function refreshCallSummaryAction(
   } catch (err) {
     if (isRedirectError(err)) throw err;
     return { ok: false, error: humanizeError(err, "Could not fetch summary.") };
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Custom HTTP tools — CRUD + Ultravox resync
+   ──────────────────────────────────────────────────────────────── */
+
+const ToolParamSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  type: z.enum(["string", "number", "boolean", "integer"]),
+  description: z.string().trim().max(300).default(""),
+  required: z.coerce.boolean().default(false),
+});
+
+const ToolUpsertSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .regex(
+      /^[a-z][a-z0-9_]*$/,
+      "Use snake_case: lowercase letters, numbers, underscores.",
+    )
+    .min(2)
+    .max(60),
+  description: z.string().trim().min(10).max(400),
+  url: z.string().trim().url("Must be a full URL, e.g. https://…"),
+  httpMethod: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("POST"),
+  headersJson: z.string().trim().optional().or(z.literal("")),
+  parametersJson: z.string().trim().optional().or(z.literal("")),
+});
+
+export type ToolActionState =
+  | { status: "idle" }
+  | { status: "error"; message: string }
+  | { status: "success" };
+
+/** Re-publish this agent's tool set to Ultravox. Idempotent. */
+async function syncAgentTools(agentId: string): Promise<void> {
+  const agent = await db.agent.findUnique({
+    where: { id: agentId },
+    include: { tools: true, knowledgeBases: true },
+  });
+  if (!agent?.ultravoxAgentId) return;
+
+  const customTools: CustomToolInput[] = agent.tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    url: t.url,
+    httpMethod: t.httpMethod,
+    headers: (t.headersJson as Record<string, string> | null) ?? null,
+    parameters: (t.parametersJson as ToolParameter[] | null) ?? null,
+  }));
+  const corpusIds = agent.knowledgeBases
+    .map((kb) => kb.ultravoxCorpusId)
+    .filter((id): id is string => Boolean(id));
+
+  const selectedTools = buildSelectedTools({
+    enableHangUp: agent.enableHangUp,
+    enableTransfer: agent.enableTransfer,
+    transferPhoneNumber: agent.transferPhoneNumber,
+    enableVoicemail: agent.enableVoicemail,
+    enablePlayDtmf: agent.enablePlayDtmf,
+    customTools,
+    corpusIds,
+  });
+
+  await updateUltravoxAgent(agent.ultravoxAgentId, { selectedTools });
+}
+
+export async function createAgentToolAction(
+  _prev: ToolActionState,
+  formData: FormData,
+): Promise<ToolActionState> {
+  const slug = formData.get("orgSlug") as string | null;
+  const agentId = formData.get("agentId") as string | null;
+  if (!slug || !agentId)
+    return { status: "error", message: "Missing workspace or agent." };
+
+  const tenant = await requireTenant(slug);
+
+  const parsed = ToolUpsertSchema.safeParse({
+    name: formData.get("name"),
+    description: formData.get("description"),
+    url: formData.get("url"),
+    httpMethod: formData.get("httpMethod") || "POST",
+    headersJson: formData.get("headersJson") || "",
+    parametersJson: formData.get("parametersJson") || "",
+  });
+  if (!parsed.success)
+    return {
+      status: "error",
+      message: parsed.error.issues[0]?.message ?? "Invalid tool.",
+    };
+
+  const agent = await db.agent.findFirst({
+    where: { id: agentId, organizationId: tenant.organizationId },
+    select: { id: true },
+  });
+  if (!agent) return { status: "error", message: "Agent not found." };
+
+  const headers = parseJsonField<Record<string, string>>(parsed.data.headersJson);
+  if (headers === "invalid")
+    return { status: "error", message: "Headers must be valid JSON." };
+  const parametersParsed = parseJsonField<unknown[]>(parsed.data.parametersJson);
+  if (parametersParsed === "invalid")
+    return { status: "error", message: "Parameters must be valid JSON." };
+  const parameters =
+    parametersParsed && Array.isArray(parametersParsed)
+      ? z.array(ToolParamSchema).safeParse(parametersParsed)
+      : null;
+  if (parameters && !parameters.success)
+    return {
+      status: "error",
+      message: parameters.error.issues[0]?.message ?? "Invalid parameters.",
+    };
+
+  try {
+    await db.agentTool.create({
+      data: {
+        agentId,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        url: parsed.data.url,
+        httpMethod: parsed.data.httpMethod,
+        headersJson: headers ?? undefined,
+        parametersJson: (parameters?.data as unknown as object) ?? undefined,
+      },
+    });
+
+    await syncAgentTools(agentId);
+
+    revalidatePath(`/orgs/${tenant.orgSlug}/agents/${agentId}`);
+    revalidatePath(`/orgs/${tenant.orgSlug}/agents/${agentId}/edit`);
+    return { status: "success" };
+  } catch (err) {
+    if (isRedirectError(err)) throw err;
+    if (
+      err instanceof Error &&
+      err.message.includes("Unique constraint")
+    )
+      return {
+        status: "error",
+        message: "A tool with that name already exists on this agent.",
+      };
+    return {
+      status: "error",
+      message: humanizeError(err, "Could not add tool."),
+    };
+  }
+}
+
+export async function deleteAgentToolAction(formData: FormData) {
+  const slug = formData.get("orgSlug") as string | null;
+  const agentId = formData.get("agentId") as string | null;
+  const toolId = formData.get("toolId") as string | null;
+  if (!slug || !agentId || !toolId) return;
+
+  const tenant = await requireTenant(slug);
+
+  const tool = await db.agentTool.findFirst({
+    where: {
+      id: toolId,
+      agent: { id: agentId, organizationId: tenant.organizationId },
+    },
+  });
+  if (!tool) return;
+
+  await db.agentTool.delete({ where: { id: toolId } });
+  await syncAgentTools(agentId);
+
+  revalidatePath(`/orgs/${tenant.orgSlug}/agents/${agentId}`);
+  revalidatePath(`/orgs/${tenant.orgSlug}/agents/${agentId}/edit`);
+}
+
+function parseJsonField<T>(raw: string | undefined): T | null | "invalid" {
+  if (!raw || raw.trim().length === 0) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return "invalid";
   }
 }
 

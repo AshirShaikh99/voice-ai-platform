@@ -26,6 +26,24 @@ const NAV: NavItem[] = [
     match: (p, s) => p.startsWith(`/orgs/${s}/agents`),
   },
   {
+    href: (s) => `/orgs/${s}/phone`,
+    label: "Phone",
+    icon: <IconPhone />,
+    match: (p, s) => p.startsWith(`/orgs/${s}/phone`),
+  },
+  {
+    href: (s) => `/orgs/${s}/knowledge`,
+    label: "Knowledge",
+    icon: <IconBook />,
+    match: (p, s) => p.startsWith(`/orgs/${s}/knowledge`),
+  },
+  {
+    href: (s) => `/orgs/${s}/campaigns`,
+    label: "Campaigns",
+    icon: <IconMegaphone />,
+    match: (p, s) => p.startsWith(`/orgs/${s}/campaigns`),
+  },
+  {
     href: (s) => `/orgs/${s}/team`,
     label: "Team",
     icon: <IconUsers />,
@@ -122,6 +140,49 @@ function IconUsers() {
       <path d="M1.2 12c.4-2.2 2-3.5 3.8-3.5S8.4 9.8 8.8 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
       <circle cx="10.5" cy="5" r="1.8" stroke="currentColor" strokeWidth="1.2" />
       <path d="M9 12c.3-1.6 1.3-2.6 2.5-2.6s2.2 1 2.5 2.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconPhone() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+      <path
+        d="M3 2h2.2l1 2.4-1.5 1.1c.6 1.5 1.8 2.7 3.3 3.3l1.1-1.5L11.5 8.3V10.5c0 .8-.7 1.5-1.5 1.5C6 12 2 8 2 3.5 2 2.7 2.7 2 3 2z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconBook() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+      <path
+        d="M2 2.5A.5.5 0 0 1 2.5 2H6c.6 0 1 .4 1 1v9c0-.6-.4-1-1-1H2.5a.5.5 0 0 1-.5-.5v-8Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path
+        d="M12 2.5a.5.5 0 0 0-.5-.5H8c-.6 0-1 .4-1 1v9c0-.6.4-1 1-1h3.5a.5.5 0 0 0 .5-.5v-8Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
+function IconMegaphone() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+      <path
+        d="M2 5.5v3c0 .3.3.5.5.5H4l1.5 3a.5.5 0 0 0 .9 0L7 10l4.5 1.5a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5L7 4H2.5a.5.5 0 0 0-.5.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
