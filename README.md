@@ -1,4 +1,4 @@
-# Resonance
+# Creatigen
 
 Multitenant voice-agent platform. Draft an agent in plain language, ground it
 in your knowledge, put it on a real phone number, and review every call.

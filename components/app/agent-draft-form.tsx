@@ -128,7 +128,7 @@ export function AgentDraftForm({
               rows={8}
               required
               defaultValue={agent?.systemPrompt}
-              placeholder="You are Anna, a calm after-hours receptionist for Resonance Inc. You help callers reschedule appointments. Stay warm and efficient. Never discuss pricing — offer to transfer to a teammate if a caller asks."
+              placeholder="You are Anna, a calm after-hours receptionist for Creatigen Inc. You help callers reschedule appointments. Stay warm and efficient. Never discuss pricing — offer to transfer to a teammate if a caller asks."
               className="w-full rounded-[6px] border border-rule bg-surface px-3 py-2 font-sans text-sm leading-[1.55] text-ink placeholder:text-ink-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             />
           </Field>
