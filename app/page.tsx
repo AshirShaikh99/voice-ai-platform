@@ -19,7 +19,6 @@ export default async function LandingPage() {
         <Hero />
         <Capabilities />
         <Workflow />
-        <Testimony />
         <ClosingCTA />
       </main>
       <SiteFooter />
@@ -42,9 +41,6 @@ function SiteNav() {
           </a>
           <a href="#workflow" className="transition-colors hover:text-ink">
             How it works
-          </a>
-          <a href="#testimony" className="transition-colors hover:text-ink">
-            From the field
           </a>
         </nav>
         <div className="flex items-center gap-2">
@@ -393,35 +389,6 @@ function Workflow() {
             </li>
           ))}
         </ol>
-      </div>
-    </section>
-  );
-}
-
-/* ────────────────────────────────────────────────────────────────
-   Editorial pull quote
-   ──────────────────────────────────────────────────────────────── */
-
-function Testimony() {
-  return (
-    <section
-      id="testimony"
-      className="border-y border-rule bg-surface-muted/40 py-24"
-    >
-      <div className="mx-auto max-w-4xl px-6 text-center scroll-reveal">
-        <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
-          From the field
-        </span>
-        <blockquote className="mt-6 font-serif text-[30px] italic leading-[1.22] tracking-[-0.02em] text-ink sm:text-[36px]">
-          &ldquo;We replaced a three-person overnight queue with a single
-          agent. The saving wasn&apos;t the headline — the headline was that
-          our customers stopped waiting on hold at 2 AM.&rdquo;
-        </blockquote>
-        <div className="mt-6 flex items-center justify-center gap-3 text-[12px] text-ink-muted">
-          <span className="font-medium text-ink">Priya Bhattacharya</span>
-          <span className="text-ink-subtle">·</span>
-          <span>Head of Support Operations, Wayfield Logistics</span>
-        </div>
       </div>
     </section>
   );
