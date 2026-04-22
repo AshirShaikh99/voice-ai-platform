@@ -3,7 +3,7 @@
 export const BRAND = {
   name: "Creatigen",
   suffix: "voice studio",
-  domain: "creatigen.com",
+  domain: "creatigen.space",
   tagline: "Creativity, in every business call.",
   shortDescription:
     "Creatigen is where you design the voice of your business. Draft an agent in plain language, ground it in your knowledge, and put it on a real phone line. Every call sounds like you — and every call gets reviewed.",
