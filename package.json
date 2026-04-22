@@ -4,10 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 4200",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start -p 4200",
-    "lint": "eslint",
-    "postinstall": "prisma generate"
+    "lint": "eslint"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.2.1",
