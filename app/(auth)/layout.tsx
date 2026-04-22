@@ -23,19 +23,19 @@ export default function AuthLayout({
         <div className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-14 lg:grid-cols-[1.15fr_1fr] lg:items-center">
           <aside className="hidden lg:block">
             <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
-              {BRAND.name} · for teams that measure
+              {BRAND.name} · creative voice for business
             </span>
             <h1 className="mt-4 font-serif text-[48px] leading-[1.05] tracking-[-0.03em] text-ink">
-              Voice agents
+              Design the voice
               <br />
               <span className="italic text-ink-muted">
-                your team actually trusts.
+                your business deserves.
               </span>
             </h1>
             <p className="mt-5 max-w-md text-[15px] leading-[1.65] text-ink-muted">
-              Draft an agent in plain language, ground it in your knowledge,
-              and put it on a real phone line. Every call transcribed, every
-              exception queued for review.
+              A creative studio for your business voice. Draft an agent in
+              plain language, give it your knowledge, and put it on a real
+              phone line — every call sounds like you.
             </p>
             <dl className="mt-10 space-y-4 border-t border-rule pt-6 text-[13px] text-ink-muted">
               <BulletRow k="Drafts" v="Write an agent like you'd brief a new hire" />

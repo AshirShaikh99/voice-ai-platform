@@ -2,11 +2,11 @@
 // whole platform — marketing, auth shell, dashboard, settings — updates.
 export const BRAND = {
   name: "Creatigen",
-  suffix: "voice platform",
+  suffix: "voice studio",
   domain: "creatigen.com",
-  tagline: "Voice agents that listen, speak, and resolve.",
+  tagline: "Creativity, in every business call.",
   shortDescription:
-    "Design conversational agents, give them your knowledge, and put them on your phone lines. Your team reviews every call — your customers never wait on hold.",
+    "Creatigen is where you design the voice of your business. Draft an agent in plain language, ground it in your knowledge, and put it on a real phone line. Every call sounds like you — and every call gets reviewed.",
 } as const;
 
 export type Brand = typeof BRAND;
