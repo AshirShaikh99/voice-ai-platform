@@ -30,7 +30,15 @@ export const metadata: Metadata = {
   openGraph: {
     title: `${BRAND.name} — ${BRAND.tagline}`,
     description: BRAND.shortDescription,
+    url: `https://${BRAND.domain}`,
+    siteName: BRAND.name,
     type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${BRAND.name} — ${BRAND.tagline}`,
+    description: BRAND.shortDescription,
   },
 };
 
