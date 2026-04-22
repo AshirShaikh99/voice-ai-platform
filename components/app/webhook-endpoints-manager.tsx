@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -171,12 +171,15 @@ function AddEndpointForm({
     FormData
   >(createWebhookEndpointAction, initial);
 
-  if (state.status === "success") {
-    queueMicrotask(() => {
+  useEffect(() => {
+    if (state.status === "success") {
       onCreated(state.secret);
       onClose();
-    });
-  }
+    }
+    // onCreated/onClose are stable closures from parent; keying only on state
+    // avoids re-firing when parent rerenders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   return (
     <form

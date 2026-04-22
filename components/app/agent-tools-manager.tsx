@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -128,10 +128,9 @@ function AddToolForm({
     FormData
   >(createAgentToolAction, initial);
 
-  if (state.status === "success") {
-    // Close after successful submission on the next render tick.
-    queueMicrotask(onClose);
-  }
+  useEffect(() => {
+    if (state.status === "success") onClose();
+  }, [state.status, onClose]);
 
   return (
     <form
@@ -188,7 +187,7 @@ function AddToolForm({
       <Field
         label="URL"
         id="tool-url"
-        hint="Where Ultravox sends the request. Must be publicly reachable."
+        hint="Where we send the request. Must be publicly reachable."
       >
         <Input
           id="tool-url"
@@ -234,7 +233,7 @@ function AddToolForm({
           </span>
         ) : (
           <span className="text-[12px] text-ink-subtle">
-            Tool is published to Ultravox on save.
+            Tool is published on save.
           </span>
         )}
         <div className="flex gap-2">

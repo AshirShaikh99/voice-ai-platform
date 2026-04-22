@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,12 @@ type Source = {
   createdAt: string;
 };
 
+const POLL_INTERVAL_MS = 4000;
+
+function isPending(status: string) {
+  return status !== "READY" && status !== "FAILED";
+}
+
 export function KnowledgeBaseSources({
   orgSlug,
   kbId,
@@ -26,8 +32,33 @@ export function KnowledgeBaseSources({
   sources: Source[];
 }) {
   const router = useRouter();
-  const [refreshing, startRefresh] = useTransition();
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const pending = sources.some((s) => isPending(s.status));
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    if (!pending) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function tick() {
+      if (cancelled || inFlight.current) return;
+      inFlight.current = true;
+      try {
+        await refreshKnowledgeBaseAction(orgSlug, kbId);
+        if (!cancelled) router.refresh();
+      } finally {
+        inFlight.current = false;
+        if (!cancelled) timer = setTimeout(tick, POLL_INTERVAL_MS);
+      }
+    }
+
+    timer = setTimeout(tick, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [orgSlug, kbId, pending, router]);
 
   return (
     <div>
@@ -37,24 +68,19 @@ export function KnowledgeBaseSources({
             ? "No sources yet — add a URL or upload a file."
             : `${sources.length} source${sources.length === 1 ? "" : "s"}`}
         </p>
-        <button
-          type="button"
-          disabled={refreshing}
-          onClick={() => {
-            startRefresh(async () => {
-              await refreshKnowledgeBaseAction(orgSlug, kbId);
-              setRefreshedAt(new Date());
-              router.refresh();
-            });
-          }}
-          className="text-[12px] text-ink-muted underline underline-offset-4 hover:text-ink disabled:opacity-50"
-        >
-          {refreshing
-            ? "Refreshing…"
-            : refreshedAt
-              ? `Refreshed ${refreshedAt.toLocaleTimeString()}`
-              : "Refresh status"}
-        </button>
+        {pending && (
+          <span
+            className="flex items-center gap-2 text-[12px] text-ink-muted"
+            role="status"
+            aria-live="polite"
+          >
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"
+            />
+            Live — updates automatically
+          </span>
+        )}
       </div>
 
       {sources.length > 0 && (
@@ -88,6 +114,7 @@ export function KnowledgeBaseSources({
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "READY") return <Badge tone="accent">Ready</Badge>;
+  if (status === "FAILED") return <Badge tone="muted">Failed</Badge>;
   if (status === "UPDATING") return <Badge tone="muted">Updating</Badge>;
   return <Badge tone="muted">Indexing</Badge>;
 }

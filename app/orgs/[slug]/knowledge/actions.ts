@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -68,6 +68,7 @@ export async function createKnowledgeBaseAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/knowledge`);
     return { status: "success", kbId: kb.id };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       status: "error",
       message:
@@ -176,6 +177,7 @@ export async function addUrlSourceAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/knowledge/${kb.id}`);
     return { status: "success", kbId: kb.id };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       status: "error",
       message:
@@ -212,6 +214,7 @@ export async function requestFileUploadAction(
     });
     return { ok: true, documentId: up.documentId, presignedUrl: up.presignedUrl };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Could not start upload.",
@@ -245,6 +248,7 @@ export async function confirmFileUploadAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/knowledge/${kb.id}`);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Could not register upload.",
@@ -285,6 +289,7 @@ export async function refreshKnowledgeBaseAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/knowledge/${kbId}`);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Could not refresh.",

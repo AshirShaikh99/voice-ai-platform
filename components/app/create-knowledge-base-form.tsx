@@ -57,8 +57,7 @@ export function CreateKnowledgeBaseForm({ orgSlug }: { orgSlug: string }) {
           </span>
         ) : (
           <span className="text-[12px] text-ink-subtle">
-            Stored on Ultravox. You can add URL crawls and PDFs on the next
-            screen.
+            You can add URL crawls and PDFs on the next screen.
           </span>
         )}
         <Button type="submit" size="sm" disabled={pending}>

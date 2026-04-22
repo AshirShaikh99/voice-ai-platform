@@ -44,8 +44,8 @@ export default async function KnowledgePage({
           <div>
             <CardTitle>New knowledge base</CardTitle>
             <CardDescription>
-              One knowledge base = one Ultravox corpus. You can add URLs and
-              PDFs to it after creation.
+              Group related URLs and PDFs into a single knowledge base. Attach
+              it to any agent after creation.
             </CardDescription>
           </div>
         </CardHeader>

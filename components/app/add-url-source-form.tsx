@@ -41,7 +41,7 @@ export function AddUrlSourceForm({
       <Field
         label="Start URL"
         id="url-source-url"
-        hint="Ultravox crawls this URL and follows links up to the depth below."
+        hint="We crawl this URL and follow links up to the depth below."
       >
         <Input
           id="url-source-url"
@@ -90,7 +90,7 @@ export function AddUrlSourceForm({
           </span>
         ) : state.status === "success" ? (
           <span className="text-[12px] text-accent" role="status">
-            Crawl started — Ultravox is indexing it.
+            Crawl started — indexing in progress.
           </span>
         ) : (
           <span className="text-[12px] text-ink-subtle">

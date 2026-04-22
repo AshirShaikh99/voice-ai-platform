@@ -20,14 +20,7 @@ const ACCEPTED_MIME = [
   "text/markdown",
 ];
 
-/**
- * Two-step file upload that matches Ultravox's presigned URL flow:
- *   1. Ask our server for a presigned URL (server calls Ultravox).
- *   2. PUT the file bytes directly to that URL from the browser.
- *   3. Tell our server the upload is done so we can record it.
- *
- * Doing the PUT from the browser keeps large files off our server entirely.
- */
+// Presigned PUT upload: server mints URL → browser PUTs bytes → server records it.
 export function FileUploadSource({
   orgSlug,
   kbId,

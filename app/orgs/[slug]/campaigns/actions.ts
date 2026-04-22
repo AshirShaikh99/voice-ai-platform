@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { advanceCampaign } from "@/lib/campaigns";
@@ -169,6 +169,7 @@ export async function uploadCampaignTargetsAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/campaigns/${campaign.id}`);
     return { ok: true, inserted, skipped };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Upload failed.",

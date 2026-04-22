@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
@@ -63,6 +64,7 @@ export async function saveTwilioCredentialsAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/phone`);
     return { status: "success", message: "Twilio connected." };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       status: "error",
       message:
@@ -103,6 +105,7 @@ export async function importTwilioNumbersAction(
     revalidatePath(`/orgs/${tenant.orgSlug}/phone`);
     return { ok: true, imported };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       ok: false,
       error:
@@ -336,6 +339,7 @@ export async function dialOutboundAction(
 
     return { status: "success", callId: call.id };
   } catch (err) {
+    unstable_rethrow(err);
     return {
       status: "error",
       message:
