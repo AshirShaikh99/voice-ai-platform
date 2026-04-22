@@ -81,6 +81,8 @@ export default async function OpenGraphImage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
           <div
             style={{
+              display: "flex",
+              flexDirection: "column",
               fontFamily: "Newsreader",
               fontStyle: "italic",
               fontWeight: 500,
@@ -91,7 +93,8 @@ export default async function OpenGraphImage() {
               maxWidth: 960,
             }}
           >
-            Creativity, in every<br />business call.
+            <div>Creativity, in every</div>
+            <div>business call.</div>
           </div>
           <div
             style={{
