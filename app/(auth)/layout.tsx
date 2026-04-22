@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { BRAND } from "@/lib/brand";
 import { Wordmark } from "@/components/ui/wordmark";
 
 export default function AuthLayout({
@@ -22,7 +23,7 @@ export default function AuthLayout({
         <div className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-14 lg:grid-cols-[1.15fr_1fr] lg:items-center">
           <aside className="hidden lg:block">
             <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
-              Voice AI · for teams that measure
+              {BRAND.name} · for teams that measure
             </span>
             <h1 className="mt-4 font-serif text-[48px] leading-[1.05] tracking-[-0.03em] text-ink">
               Voice agents

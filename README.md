@@ -1,9 +1,7 @@
-# Voice AI Platform — Phase 1
+# Resonance
 
-A multitenant SaaS foundation for a future voice AI product. This phase builds
-the auth flow, organization-based multitenancy, the dashboard shell, and a
-polished UI/UX. **No voice features yet** — the codebase is structured so a
-future Ultravox module can be added cleanly.
+Multitenant voice-agent platform. Draft an agent in plain language, ground it
+in your knowledge, put it on a real phone number, and review every call.
 
 ## Stack
 

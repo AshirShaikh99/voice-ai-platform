@@ -78,7 +78,7 @@ function Hero() {
         <div className="flex flex-col gap-8 fade-in-up">
           <span className="inline-flex w-fit items-center gap-2 rounded-full border border-rule bg-surface px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-ink-muted">
             <LiveDot />
-            Voice AI · for teams that measure
+            {BRAND.name} · for teams that measure
           </span>
           <h1 className="font-serif text-[56px] leading-[1.02] tracking-[-0.035em] text-ink sm:text-[68px] md:text-[84px]">
             Voice agents that

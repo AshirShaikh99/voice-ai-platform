@@ -1,12 +1,13 @@
 {
-  "name": "voice-ai-platform",
+  "name": "resonance",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 4200",
     "build": "next build",
     "start": "next start -p 4200",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.2.1",
